@@ -1,0 +1,1593 @@
+<?php
+ob_start();
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST');
+header('Access-Control-Allow-Headers: Content-Type');
+
+require_once 'config.php';
+
+session_start();
+
+$tipo = $_GET['tipo'] ?? '';
+$acao = $_GET['acao'] ?? '';
+$dados = json_decode(file_get_contents('php://input'), true);
+
+try {
+    $conn = getDbConnection();
+} catch (Exception $e) {
+    ob_clean();
+    // DEBUG: Exibindo erro detalhado para identificar o problema em produção
+    $erro_msg = 'Erro de conexão: ' . $e->getMessage();
+    if (defined('DB_HOST')) {
+        $erro_msg .= ' | Tentando conectar em: ' . DB_HOST;
+    }
+    echo json_encode(['sucesso' => false, 'erro' => $erro_msg]);
+    exit;
+}
+
+ob_clean();
+
+// TESTE
+if ($tipo === 'teste' || ($tipo === '' && $acao === '')) {
+    echo json_encode(['sucesso' => true, 'mensagem' => 'API OK']);
+    exit;
+}
+
+// Função para aplicar filtro de empresa
+function aplicarFiltroEmpresa($query, $alias = '', $coluna = 'empresa_id') {
+    if (!isset($_SESSION['empresas_permitidas']) || $_SESSION['empresas_permitidas'] === 'ALL') {
+        return $query;
+    }
+    
+    if (empty($_SESSION['empresas_permitidas'])) {
+        return $query . " AND 1=0";
+    }
+    
+    $empresas_str = implode(',', array_map('intval', $_SESSION['empresas_permitidas']));
+    $campo_empresa = $alias ? $alias . '.' . $coluna : $coluna;
+    
+    return $query . " AND $campo_empresa IN ($empresas_str)";
+}
+
+// DASHBOARD
+if ($tipo === 'dashboard') {
+    if ($acao === 'stats') {
+        $stats = [];
+        
+        // 1. CARDS DATA
+        // Total Empresas (Admin only)
+        if (!isset($_SESSION['empresas_permitidas']) || $_SESSION['empresas_permitidas'] === 'ALL') {
+            $stats['total_empresas'] = $conn->query('SELECT COUNT(*) as total FROM empresas_terceirizadas WHERE status = "Ativa"')->fetch_assoc()['total'];
+        }
+        
+        // Total Materiais (Scoped)
+        $query_mat = 'SELECT COUNT(*) as total FROM materiais WHERE ativo = 1';
+        $query_mat = aplicarFiltroEmpresa($query_mat);
+        $stats['total_materiais'] = $conn->query($query_mat)->fetch_assoc()['total'];
+        
+        // Estoque Baixo (Scoped)
+        $query_baixo = 'SELECT COUNT(*) as total FROM materiais WHERE ativo = 1 AND estoque_atual < ponto_reposicao';
+        $query_baixo = aplicarFiltroEmpresa($query_baixo);
+        $stats['estoque_baixo'] = $conn->query($query_baixo)->fetch_assoc()['total'];
+        
+        // Valor Total em Estoque (Scoped)
+        $query_valor = 'SELECT SUM(estoque_atual * valor_unitario) as total FROM materiais WHERE ativo = 1';
+        $query_valor = aplicarFiltroEmpresa($query_valor);
+        $stats['valor_total_estoque'] = $conn->query($query_valor)->fetch_assoc()['total'] ?? 0;
+        
+        // Total Itens Disponíveis (Scoped - para Operador)
+        $query_itens = 'SELECT SUM(estoque_atual) as total FROM materiais WHERE ativo = 1';
+        $query_itens = aplicarFiltroEmpresa($query_itens);
+        $stats['total_itens'] = $conn->query($query_itens)->fetch_assoc()['total'] ?? 0;
+
+        // Total Movimentações (Últimos 30 dias - Scoped)
+        $data_inicio = date('Y-m-d', strtotime("-30 days"));
+        
+        // Entradas
+        $query_ent = "SELECT COUNT(*) as total FROM movimentacoes_entrada me 
+                      JOIN materiais m ON me.material_id = m.id 
+                      WHERE me.data_entrada >= '$data_inicio'";
+        $query_ent = aplicarFiltroEmpresa($query_ent, 'm');
+        $total_entradas = $conn->query($query_ent)->fetch_assoc()['total'];
+        
+        // Saídas
+        $query_sai = "SELECT COUNT(*) as total FROM movimentacoes_saida ms 
+                      JOIN materiais m ON ms.material_id = m.id 
+                      WHERE ms.data_saida >= '$data_inicio'";
+        $query_sai = aplicarFiltroEmpresa($query_sai, 'm');
+        $total_saidas = $conn->query($query_sai)->fetch_assoc()['total'];
+        
+        $stats['total_movimentacoes'] = $total_entradas + $total_saidas;
+
+        // 2. CHARTS DATA
+        
+        // Chart: Trend (Entrada vs Saída - Últimos 30 dias)
+        $trend_data = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $date = date('Y-m-d', strtotime("-$i days"));
+            $trend_data[$date] = ['entrada' => 0, 'saida' => 0];
+        }
+        
+        // Dados de Entrada diária
+        $query_trend_ent = "SELECT DATE(me.data_entrada) as data, SUM(me.quantidade) as qtd 
+                            FROM movimentacoes_entrada me 
+                            JOIN materiais m ON me.material_id = m.id 
+                            WHERE me.data_entrada >= '$data_inicio'";
+        $query_trend_ent = aplicarFiltroEmpresa($query_trend_ent, 'm');
+        $query_trend_ent .= " GROUP BY DATE(me.data_entrada)";
+        $res_ent = $conn->query($query_trend_ent);
+        while ($row = $res_ent->fetch_assoc()) {
+            if (isset($trend_data[$row['data']])) {
+                $trend_data[$row['data']]['entrada'] = (int)$row['qtd'];
+            }
+        }
+        
+        // Dados de Saída diária
+        $query_trend_sai = "SELECT DATE(ms.data_saida) as data, SUM(ms.quantidade) as qtd 
+                            FROM movimentacoes_saida ms 
+                            JOIN materiais m ON ms.material_id = m.id 
+                            WHERE ms.data_saida >= '$data_inicio'";
+        $query_trend_sai = aplicarFiltroEmpresa($query_trend_sai, 'm');
+        $query_trend_sai .= " GROUP BY DATE(ms.data_saida)";
+        $res_sai = $conn->query($query_trend_sai);
+        while ($row = $res_sai->fetch_assoc()) {
+            if (isset($trend_data[$row['data']])) {
+                $trend_data[$row['data']]['saida'] = (int)$row['qtd'];
+            }
+        }
+        
+        $stats['charts']['trend'] = [
+            'labels' => array_keys($trend_data),
+            'entradas' => array_column($trend_data, 'entrada'),
+            'saidas' => array_column($trend_data, 'saida')
+        ];
+        
+        // Chart: Stock Composition (Por Categoria)
+        $query_comp = "SELECT c.nome as categoria, COUNT(m.id) as qtd 
+                       FROM materiais m 
+                       JOIN categorias_materiais c ON m.categoria_id = c.id 
+                       WHERE m.ativo = 1";
+        $query_comp = aplicarFiltroEmpresa($query_comp, 'm');
+        $query_comp .= " GROUP BY c.id";
+        $res_comp = $conn->query($query_comp);
+        $stats['charts']['composition'] = $res_comp->fetch_all(MYSQLI_ASSOC);
+        
+        // Chart: Top 5 Materials (Saídas - Últimos 30 dias)
+        $query_top = "SELECT m.nome, SUM(ms.quantidade) as total_saida 
+                      FROM movimentacoes_saida ms 
+                      JOIN materiais m ON ms.material_id = m.id 
+                      WHERE ms.data_saida >= '$data_inicio'";
+        $query_top = aplicarFiltroEmpresa($query_top, 'm');
+        $query_top .= " GROUP BY m.id ORDER BY total_saida DESC LIMIT 5";
+        $res_top = $conn->query($query_top);
+        $stats['charts']['top5'] = $res_top->fetch_all(MYSQLI_ASSOC);
+        
+        echo json_encode(['sucesso' => true, 'dados' => $stats]);
+        exit;
+    }
+}
+
+// RELATÓRIOS
+if ($tipo === 'relatorios') {
+    // 1. Resumo Geral (Dashboard)
+    if ($acao === 'resumo_geral') {
+        $total_empresas = $conn->query('SELECT COUNT(*) as total FROM empresas_terceirizadas WHERE status = "Ativa"')->fetch_assoc()['total'];
+        $total_materiais = $conn->query('SELECT COUNT(*) as total FROM materiais WHERE ativo = 1')->fetch_assoc()['total'];
+        $estoque_baixo = $conn->query('SELECT COUNT(*) as total FROM materiais WHERE ativo = 1 AND estoque_atual < ponto_reposicao')->fetch_assoc()['total'];
+        
+        // Calcular valor total do estoque
+        $valor_total = $conn->query('SELECT SUM(estoque_atual * valor_unitario) as total FROM materiais WHERE ativo = 1')->fetch_assoc()['total'];
+        
+        echo json_encode([
+            'sucesso' => true,
+            'dados' => [
+                'total_empresas' => $total_empresas,
+                'total_materiais' => $total_materiais,
+                'estoque_baixo' => $estoque_baixo,
+                'valor_total_estoque' => 'R$ ' . number_format($valor_total ?? 0, 2, ',', '.')
+            ]
+        ]);
+        exit;
+    }
+
+    // 2. Estoque por Empresa
+    if ($acao === 'estoque_por_empresa') {
+        $query = 'SELECT e.nome, 
+                         COUNT(m.id) as total_materiais, 
+                         SUM(m.estoque_atual) as total_estoque,
+                         SUM(m.estoque_atual * m.valor_unitario) as valor_total
+                  FROM empresas_terceirizadas e
+                  LEFT JOIN materiais m ON e.id = m.empresa_id AND m.ativo = 1
+                  WHERE e.status = "Ativa"';
+        
+        $query = aplicarFiltroEmpresa($query, 'e', 'id');
+        $query .= ' GROUP BY e.id ORDER BY e.nome';
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 3. Movimentações (Entradas e Saídas)
+    if ($acao === 'movimentacoes') {
+        $periodo = $_GET['periodo'] ?? 30; // Dias
+        $tipo_mov = $_GET['tipo_mov'] ?? 'todos';
+        $empresa_id = $_GET['empresa_id'] ?? '';
+        
+        $data_inicio = date('Y-m-d', strtotime("-$periodo days"));
+        
+        $dados = [];
+        
+        // Entradas
+        if ($tipo_mov === 'todos' || $tipo_mov === 'entrada') {
+            $query = "SELECT 'Entrada' as tipo, me.data_entrada as data, m.nome as material, e.nome as empresa, me.quantidade, u.nome as responsavel
+                      FROM movimentacoes_entrada me
+                      JOIN materiais m ON me.material_id = m.id
+                      LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                      LEFT JOIN usuarios u ON me.responsavel_id = u.id
+                      WHERE me.data_entrada >= '$data_inicio'";
+            
+            if ($empresa_id) $query .= " AND m.empresa_id = " . intval($empresa_id);
+            $query = aplicarFiltroEmpresa($query, 'm');
+            
+            $result = $conn->query($query);
+            if ($result) $dados = array_merge($dados, $result->fetch_all(MYSQLI_ASSOC));
+        }
+        
+        // Saídas
+        if ($tipo_mov === 'todos' || $tipo_mov === 'saida') {
+            $query = "SELECT 'Saída' as tipo, ms.data_saida as data, m.nome as material, e.nome as empresa, ms.quantidade, '-' as responsavel
+                      FROM movimentacoes_saida ms
+                      JOIN materiais m ON ms.material_id = m.id
+                      LEFT JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
+                      WHERE ms.data_saida >= '$data_inicio'";
+            
+            if ($empresa_id) $query .= " AND ms.empresa_solicitante_id = " . intval($empresa_id);
+            // Nota: Saída pode ser vista por quem tem acesso à empresa solicitante OU dona do material? 
+            // Simplificação: filtro pela empresa dona do material (m.empresa_id)
+            $query = aplicarFiltroEmpresa($query, 'm'); 
+            
+            $result = $conn->query($query);
+            if ($result) $dados = array_merge($dados, $result->fetch_all(MYSQLI_ASSOC));
+        }
+        
+        // Ordenar por data decrescente
+        usort($dados, function($a, $b) {
+            return strtotime($b['data']) - strtotime($a['data']);
+        });
+        
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 4. Consumo por Empresa (Saídas)
+    if ($acao === 'consumo_por_empresa') {
+        $query = "SELECT e.nome as empresa, COUNT(ms.id) as total_saidas, SUM(ms.quantidade) as total_itens
+                  FROM movimentacoes_saida ms
+                  JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
+                  WHERE ms.data_saida >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        
+        // Filtrar pelas empresas que o usuário tem acesso (usando o ID da empresa solicitante)
+        $query = aplicarFiltroEmpresa($query, 'e', 'id');
+        $query .= " GROUP BY e.id ORDER BY total_itens DESC";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 5. Inventário Completo
+    if ($acao === 'inventario_completo') {
+        $query = "SELECT m.nome, m.codigo_sku, e.nome as empresa, c.nome as categoria, 
+                         m.estoque_atual, m.unidade_medida_id, l.nome as local
+                  FROM materiais m
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                  LEFT JOIN categorias_materiais c ON m.categoria_id = c.id
+                  LEFT JOIN locais_armazenamento l ON m.local_id = l.id
+                  WHERE m.ativo = 1";
+        
+        $query = aplicarFiltroEmpresa($query, 'm');
+        $query .= " ORDER BY e.nome, m.nome";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 6. Baixo Estoque (já existente, mas ajustado para filtro)
+    if ($acao === 'estoque_baixo') {
+        $query = "SELECT m.nome, m.codigo_sku, e.nome as empresa_nome, m.estoque_atual, m.ponto_reposicao,
+                         ROUND((m.estoque_atual / m.ponto_reposicao) * 100, 1) as percentual_ponto
+                  FROM materiais m
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                  WHERE m.ativo = 1 AND m.estoque_atual < m.ponto_reposicao";
+        
+        $query = aplicarFiltroEmpresa($query, 'm');
+        
+        if (isset($_GET['empresa_id']) && !empty($_GET['empresa_id'])) {
+            $query .= " AND m.empresa_id = " . intval($_GET['empresa_id']);
+        }
+        
+        $query .= " ORDER BY percentual_ponto ASC";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 7. Sobressalência (Estoque Alto)
+    if ($acao === 'sobressalencia') {
+        $query = "SELECT m.nome, m.codigo_sku, e.nome as empresa_nome, m.estoque_atual, m.estoque_maximo,
+                         ROUND((m.estoque_atual / m.estoque_maximo) * 100, 1) as percentual_maximo
+                  FROM materiais m
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                  WHERE m.ativo = 1 AND m.estoque_atual > m.estoque_maximo";
+        
+        $query = aplicarFiltroEmpresa($query, 'm');
+        
+        if (isset($_GET['empresa_id']) && !empty($_GET['empresa_id'])) {
+            $query .= " AND m.empresa_id = " . intval($_GET['empresa_id']);
+        }
+        
+        $query .= " ORDER BY percentual_maximo DESC";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+}
+
+// Função para gerar código SKU automático
+function gerarCodigoSKU($conn, $categoria_id, $empresa_id) {
+    try {
+        // Buscar categoria
+        $stmt = $conn->prepare('SELECT nome FROM categorias_materiais WHERE id = ?');
+        $stmt->bind_param('i', $categoria_id);
+        $stmt->execute();
+        $categoria = $stmt->get_result()->fetch_assoc();
+        
+        if (!$categoria) {
+            throw new Exception('Categoria não encontrada');
+        }
+        
+        // Buscar empresa
+        $stmt = $conn->prepare('SELECT nome FROM empresas_terceirizadas WHERE id = ?');
+        $stmt->bind_param('i', $empresa_id);
+        $stmt->execute();
+        $empresa = $stmt->get_result()->fetch_assoc();
+        
+        if (!$empresa) {
+            throw new Exception('Empresa não encontrada');
+        }
+        
+        // Criar prefixo: 3 letras da categoria + 2 letras da empresa
+        $nome_cat = preg_replace('/[^A-Za-z]/', '', $categoria['nome']);
+        $nome_emp = preg_replace('/[^A-Za-z]/', '', $empresa['nome']);
+        
+        $prefixo_cat = strtoupper(substr($nome_cat ?: 'MAT', 0, 3));
+        $prefixo_emp = strtoupper(substr($nome_emp ?: 'EMP', 0, 2));
+        
+        // Buscar próximo número sequencial
+        $prefixo = $prefixo_cat . $prefixo_emp;
+        
+        // Verificar se tabela materiais existe
+        $result = $conn->query("SHOW TABLES LIKE 'materiais'");
+        if ($result->num_rows == 0) {
+            // Se não existe, começar do 1
+            $proximo_num = 1;
+        } else {
+            $stmt = $conn->prepare('SELECT MAX(CAST(SUBSTRING(codigo_sku, 6) AS UNSIGNED)) as ultimo_num FROM materiais WHERE codigo_sku LIKE ?');
+            $like_pattern = $prefixo . '%';
+            $stmt->bind_param('s', $like_pattern);
+            $stmt->execute();
+            $result = $stmt->get_result()->fetch_assoc();
+            $proximo_num = ($result['ultimo_num'] ?? 0) + 1;
+        }
+        
+        return $prefixo . str_pad($proximo_num, 4, '0', STR_PAD_LEFT);
+        
+    } catch (Exception $e) {
+        error_log('Erro ao gerar SKU: ' . $e->getMessage());
+        return 'MAT' . date('His') . rand(10, 99);
+    }
+}
+
+// CADASTRO DE USUÁRIO
+if ($tipo === 'auth' && $acao === 'cadastrar') {
+    $stmt = $conn->prepare('SELECT id FROM usuarios_pendentes WHERE email = ?');
+    $stmt->bind_param('s', $dados['email']);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows > 0) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Email já cadastrado']);
+        exit;
+    }
+    
+    $stmt = $conn->prepare('SELECT id FROM usuarios WHERE email = ?');
+    $stmt->bind_param('s', $dados['email']);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows > 0) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Email já existe no sistema']);
+        exit;
+    }
+    
+    $senha_hash = password_hash($dados['senha'], PASSWORD_DEFAULT);
+    $stmt = $conn->prepare('INSERT INTO usuarios_pendentes (nome, email, senha, departamento, justificativa) VALUES (?, ?, ?, ?, ?)');
+    $stmt->bind_param('sssss', $dados['nome'], $dados['email'], $senha_hash, $dados['departamento'], $dados['justificativa']);
+    
+    if ($stmt->execute()) {
+        echo json_encode(['sucesso' => true, 'mensagem' => 'Solicitação enviada! Aguarde aprovação do administrador.']);
+    } else {
+        echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar solicitação']);
+    }
+    exit;
+}
+
+// LISTAR USUÁRIOS PENDENTES
+if ($tipo === 'usuarios' && $acao === 'pendentes') {
+    if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Acesso negado']);
+        exit;
+    }
+    
+    $result = $conn->query('SELECT id, nome, email, departamento, justificativa, data_solicitacao FROM usuarios_pendentes WHERE status = "Pendente" ORDER BY data_solicitacao DESC');
+    $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+    echo json_encode(['sucesso' => true, 'dados' => $dados]);
+    exit;
+}
+
+// APROVAR USUÁRIO
+if ($tipo === 'usuarios' && $acao === 'aprovar') {
+    if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Acesso negado']);
+        exit;
+    }
+    
+    $stmt = $conn->prepare('SELECT * FROM usuarios_pendentes WHERE id = ? AND status = "Pendente"');
+    $stmt->bind_param('i', $dados['id']);
+    $stmt->execute();
+    $usuario_pendente = $stmt->get_result()->fetch_assoc();
+    
+    if (!$usuario_pendente) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Usuário não encontrado']);
+        exit;
+    }
+    
+    
+    $conn->begin_transaction();
+    try {
+        // Criar usuário com TODOS os campos necessários
+        $stmt = $conn->prepare('INSERT INTO usuarios (nome, email, senha, perfil_id, departamento, cargo, ativo) VALUES (?, ?, ?, ?, ?, ?, 1)');
+        if (!$stmt) {
+            throw new Exception('Erro ao preparar statement: ' . $conn->error);
+        }
+        
+        // Definir cargo padrão se não existir na tabela pendentes
+        $cargo = isset($usuario_pendente['cargo']) ? $usuario_pendente['cargo'] : 'Colaborador';
+        $departamento = $usuario_pendente['departamento'] ?? 'Não informado';
+        
+        $stmt->bind_param('sssiss', 
+            $usuario_pendente['nome'], 
+            $usuario_pendente['email'], 
+            $usuario_pendente['senha'], 
+            $dados['perfil_id'], 
+            $departamento,
+            $cargo
+        );
+        
+        if (!$stmt->execute()) {
+            throw new Exception('Erro ao inserir usuário: ' . $stmt->error);
+        }
+        
+        $novo_usuario_id = $conn->insert_id;
+        
+        if (!$novo_usuario_id) {
+            throw new Exception('Erro: ID do novo usuário não foi gerado');
+        }
+        
+        // Vincular empresas se fornecidas
+        if (!empty($dados['empresas']) && is_array($dados['empresas'])) {
+            $stmt_empresa = $conn->prepare('INSERT INTO usuarios_empresas (usuario_id, empresa_id) VALUES (?, ?)');
+            if (!$stmt_empresa) {
+                throw new Exception('Erro ao preparar statement de empresas: ' . $conn->error);
+            }
+            
+            foreach ($dados['empresas'] as $empresa_id) {
+                $stmt_empresa->bind_param('ii', $novo_usuario_id, $empresa_id);
+                if (!$stmt_empresa->execute()) {
+                    throw new Exception('Erro ao vincular empresa: ' . $stmt_empresa->error);
+                }
+            }
+        }
+        
+        // Atualizar status do pendente
+        $stmt = $conn->prepare('UPDATE usuarios_pendentes SET status = "Aprovado", aprovado_por = ?, data_aprovacao = NOW() WHERE id = ?');
+        $stmt->bind_param('ii', $_SESSION['usuario_id'], $dados['id']);
+        if (!$stmt->execute()) {
+            throw new Exception('Erro ao atualizar status pendente: ' . $stmt->error);
+        }
+        
+        $conn->commit();
+        echo json_encode(['sucesso' => true, 'mensagem' => 'Usuário aprovado e criado com sucesso', 'usuario_id' => $novo_usuario_id]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log('Erro ao aprovar usuário: ' . $e->getMessage());
+        echo json_encode(['sucesso' => false, 'erro' => 'Erro ao aprovar usuário: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
+// GESTÃO DE LOCAIS
+if ($tipo === 'locais') {
+    if ($acao === 'listar') {
+        $sql = "SELECT l.*, 
+                GROUP_CONCAT(e.id) as empresas_ids,
+                GROUP_CONCAT(e.nome SEPARATOR ', ') as empresas_nomes
+                FROM locais_armazenamento l
+                LEFT JOIN locais_empresas le ON l.id = le.local_id
+                LEFT JOIN empresas_terceirizadas e ON le.empresa_id = e.id
+                WHERE l.ativo = 1 
+                GROUP BY l.id
+                ORDER BY l.nome";
+        $result = $conn->query($sql);
+        $locais = [];
+        while ($row = $result->fetch_assoc()) {
+            $locais[] = $row;
+        }
+        echo json_encode(['sucesso' => true, 'dados' => $locais]);
+        exit;
+    }
+
+    if ($acao === 'criar') {
+        $conn->begin_transaction();
+        try {
+            $stmt = $conn->prepare("INSERT INTO locais_armazenamento (nome, descricao, ativo) VALUES (?, ?, 1)");
+            $stmt->bind_param('ss', $dados['nome'], $dados['descricao']);
+            $stmt->execute();
+            $local_id = $conn->insert_id;
+
+            if (!empty($dados['empresas']) && is_array($dados['empresas'])) {
+                $stmt_emp = $conn->prepare("INSERT INTO locais_empresas (local_id, empresa_id) VALUES (?, ?)");
+                foreach ($dados['empresas'] as $empresa_id) {
+                    $stmt_emp->bind_param('ii', $local_id, $empresa_id);
+                    $stmt_emp->execute();
+                }
+            }
+
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Local criado com sucesso']);
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao criar local: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
+    if ($acao === 'atualizar') {
+        $conn->begin_transaction();
+        try {
+            $stmt = $conn->prepare("UPDATE locais_armazenamento SET nome = ?, descricao = ? WHERE id = ?");
+            $stmt->bind_param('ssi', $dados['nome'], $dados['descricao'], $dados['id']);
+            $stmt->execute();
+
+            // Atualizar vínculos: remover todos e inserir novos
+            $stmt_del = $conn->prepare("DELETE FROM locais_empresas WHERE local_id = ?");
+            $stmt_del->bind_param('i', $dados['id']);
+            $stmt_del->execute();
+
+            if (!empty($dados['empresas']) && is_array($dados['empresas'])) {
+                $stmt_emp = $conn->prepare("INSERT INTO locais_empresas (local_id, empresa_id) VALUES (?, ?)");
+                foreach ($dados['empresas'] as $empresa_id) {
+                    $stmt_emp->bind_param('ii', $dados['id'], $empresa_id);
+                    $stmt_emp->execute();
+                }
+            }
+
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Local atualizado com sucesso']);
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar local: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
+    if ($acao === 'excluir') {
+        $id = (int)$_GET['id'];
+        // Soft delete
+        $stmt = $conn->prepare("UPDATE locais_armazenamento SET ativo = 0 WHERE id = ?");
+        $stmt->bind_param('i', $id);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Local excluído com sucesso']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir local: ' . $stmt->error]);
+        }
+        exit;
+    }
+}
+
+// REJEITAR USUÁRIO
+if ($tipo === 'usuarios' && $acao === 'rejeitar') {
+    if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Acesso negado']);
+        exit;
+    }
+    
+    $stmt = $conn->prepare('UPDATE usuarios_pendentes SET status = "Rejeitado", aprovado_por = ?, data_aprovacao = NOW() WHERE id = ? AND status = "Pendente"');
+    $stmt->bind_param('ii', $_SESSION['usuario_id'], $dados['id']);
+    
+    if ($stmt->execute() && $stmt->affected_rows > 0) {
+        echo json_encode(['sucesso' => true, 'mensagem' => 'Usuário rejeitado']);
+    } else {
+        echo json_encode(['sucesso' => false, 'erro' => 'Usuário não encontrado']);
+    }
+    exit;
+}
+
+// LOGIN
+if ($tipo === 'auth' && $acao === 'login') {
+    $stmt = $conn->prepare('SELECT u.*, p.nome as perfil_nome FROM usuarios u LEFT JOIN perfis_acesso p ON u.perfil_id = p.id WHERE u.email = ? AND u.ativo = 1');
+    $stmt->bind_param('s', $dados['email']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows === 0) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Email não encontrado']);
+        exit;
+    }
+    
+    $usuario = $result->fetch_assoc();
+    
+    if (password_verify($dados['senha'], $usuario['senha'])) {
+        $_SESSION['usuario_id'] = $usuario['id'];
+        $_SESSION['usuario_nome'] = $usuario['nome'];
+        $_SESSION['usuario_perfil'] = $usuario['perfil_id'];
+        
+        // Definir empresas permitidas
+        if ($usuario['perfil_id'] == 1) {
+            $_SESSION['empresas_permitidas'] = 'ALL';
+            $usuario['empresas_vinculadas'] = 'ALL';
+        } else {
+            $stmt2 = $conn->prepare('SELECT ue.empresa_id, e.nome FROM usuarios_empresas ue JOIN empresas_terceirizadas e ON ue.empresa_id = e.id WHERE ue.usuario_id = ?');
+            $stmt2->bind_param('i', $usuario['id']);
+            $stmt2->execute();
+            $result2 = $stmt2->get_result();
+            
+            $empresas = [];
+            $empresas_info = [];
+            while ($row = $result2->fetch_assoc()) {
+                $empresas[] = $row['empresa_id'];
+                $empresas_info[] = ['id' => $row['empresa_id'], 'nome' => $row['nome']];
+            }
+            $_SESSION['empresas_permitidas'] = $empresas;
+            $usuario['empresas_vinculadas'] = $empresas_info;
+        }
+        
+        // Garantir que perfil_id seja retornado como inteiro
+        $usuario['perfil_id'] = (int)$usuario['perfil_id'];
+        $usuario['id'] = (int)$usuario['id'];
+        
+        unset($usuario['senha']);
+        echo json_encode(['sucesso' => true, 'dados' => $usuario]);
+    } else {
+        echo json_encode(['sucesso' => false, 'erro' => 'Senha incorreta']);
+    }
+    exit;
+}
+
+// EMPRESAS
+if ($tipo === 'empresas') {
+    if ($acao === 'listar') {
+        $query = 'SELECT id, nome, tipo_servico, numero_contrato FROM empresas_terceirizadas WHERE status = "Ativa"';
+        $query = aplicarFiltroEmpresa($query);
+        $query .= ' LIMIT 50';
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+    
+    if ($acao === 'criar') {
+        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem cadastrar empresas']);
+            exit;
+        }
+        
+        $stmt = $conn->prepare('INSERT INTO empresas_terceirizadas (nome, tipo_servico, numero_contrato, responsavel_id) VALUES (?, ?, ?, 1)');
+        $stmt->bind_param('sss', $dados['nome'], $dados['tipo_servico'], $dados['numero_contrato']);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa cadastrada']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar']);
+        }
+        exit;
+    }
+    
+    if ($acao === 'excluir') {
+        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem excluir empresas']);
+            exit;
+        }
+        
+        $empresa_id = $dados['id'] ?? 0;
+        if (!$empresa_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID da empresa não informado']);
+            exit;
+        }
+        
+        // Verificar se há materiais associados
+        $stmt = $conn->prepare('SELECT COUNT(*) as total FROM materiais WHERE empresa_id = ? AND ativo = 1');
+        $stmt->bind_param('i', $empresa_id);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_assoc();
+        
+        if ($result['total'] > 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Não é possível excluir empresa com materiais associados']);
+            exit;
+        }
+        
+        // Verificar se há usuários vinculados e desvincular
+        $stmt = $conn->prepare('DELETE FROM usuarios_empresas WHERE empresa_id = ?');
+        $stmt->bind_param('i', $empresa_id);
+        $stmt->execute();
+        
+        // Excluir a empresa
+        $stmt = $conn->prepare('DELETE FROM empresas_terceirizadas WHERE id = ?');
+        $stmt->bind_param('i', $empresa_id);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa excluída com sucesso']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir empresa']);
+        }
+        exit;
+    }
+    
+    if ($acao === 'atualizar') {
+        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem editar empresas']);
+            exit;
+        }
+        
+        $empresa_id = $dados['id'] ?? 0;
+        if (!$empresa_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID da empresa não informado']);
+            exit;
+        }
+        
+        $stmt = $conn->prepare('UPDATE empresas_terceirizadas SET nome=?, tipo_servico=?, numero_contrato=?, cnpj=?, telefone=?, email=? WHERE id=?');
+        $stmt->bind_param('ssssssi', $dados['nome'], $dados['tipo_servico'], $dados['numero_contrato'], $dados['cnpj'], $dados['telefone'], $dados['email'], $empresa_id);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa atualizada com sucesso']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar empresa']);
+        }
+        exit;
+    }
+}
+
+// CATEGORIAS (apenas admin)
+if ($tipo === 'categorias') {
+    if ($acao === 'listar') {
+        $result = $conn->query('SELECT id, nome, descricao FROM categorias_materiais ORDER BY nome');
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+    
+    if ($acao === 'criar') {
+        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem cadastrar categorias']);
+            exit;
+        }
+        
+        $stmt = $conn->prepare('INSERT INTO categorias_materiais (nome, descricao) VALUES (?, ?)');
+        $stmt->bind_param('ss', $dados['nome'], $dados['descricao']);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Categoria cadastrada']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar: ' . $conn->error]);
+        }
+        exit;
+    }
+}
+
+// MATERIAIS
+if ($tipo === 'materiais') {
+    if ($acao === 'listar') {
+        try {
+            $query = 'SELECT m.*, e.nome as empresa_nome, c.nome as categoria_nome 
+                      FROM materiais m 
+                      LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id 
+                      LEFT JOIN categorias_materiais c ON m.categoria_id = c.id 
+                      WHERE m.ativo = 1';
+            
+            // Aplicar filtro apenas se usuário não for admin
+            if (isset($_SESSION['empresas_permitidas']) && $_SESSION['empresas_permitidas'] !== 'ALL') {
+                if (!empty($_SESSION['empresas_permitidas'])) {
+                    $empresas_str = implode(',', array_map('intval', $_SESSION['empresas_permitidas']));
+                    $query .= " AND m.empresa_id IN ($empresas_str)";
+                } else {
+                    $query .= " AND 1=0"; // Nenhuma empresa permitida
+                }
+            }
+            
+            // Filtro adicional por empresa específica
+            if (isset($_GET['empresa_id']) && !empty($_GET['empresa_id'])) {
+                $empresa_filtro = intval($_GET['empresa_id']);
+                if ($_SESSION['empresas_permitidas'] === 'ALL' || in_array($empresa_filtro, $_SESSION['empresas_permitidas'])) {
+                    $query .= " AND m.empresa_id = $empresa_filtro";
+                }
+            }
+            
+            // Filtro de busca por nome ou código SKU
+            if (isset($_GET['busca']) && !empty($_GET['busca'])) {
+                $busca = $conn->real_escape_string($_GET['busca']);
+                $query .= " AND (m.nome LIKE '%$busca%' OR m.codigo_sku LIKE '%$busca%')";
+            }
+
+            if (isset($_GET['local_id']) && !empty($_GET['local_id'])) {
+                $local_id = intval($_GET['local_id']);
+                $query .= " AND m.local_id = $local_id";
+            }
+            
+            $query .= ' ORDER BY m.nome LIMIT 50';
+            
+            $result = $conn->query($query);
+            if (!$result) {
+                throw new Exception('Erro na consulta: ' . $conn->error);
+            }
+            
+            $dados = $result->fetch_all(MYSQLI_ASSOC);
+            echo json_encode(['sucesso' => true, 'dados' => $dados, 'query' => $query]);
+            
+        } catch (Exception $e) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao listar materiais: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+    
+    if ($acao === 'por_empresa') {
+        $empresa_id = $_GET['empresa_id'] ?? 0;
+        
+        if (!$empresa_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID da empresa é obrigatório']);
+            exit;
+        }
+        
+        $query = 'SELECT m.id, m.nome, m.codigo_sku, m.estoque_atual FROM materiais m WHERE m.ativo = 1 AND m.empresa_id = ?';
+        
+        // Aplicar filtro de empresas permitidas
+        if (isset($_SESSION['empresas_permitidas']) && $_SESSION['empresas_permitidas'] !== 'ALL') {
+            if (!in_array($empresa_id, $_SESSION['empresas_permitidas'])) {
+                echo json_encode(['sucesso' => false, 'erro' => 'Empresa não autorizada']);
+                exit;
+            }
+        }
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('i', $empresa_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+    
+    if ($acao === 'gerar_sku') {
+        try {
+            if (empty($dados['categoria_id']) || empty($dados['empresa_id'])) {
+                echo json_encode(['sucesso' => false, 'erro' => 'Selecione categoria e empresa antes de gerar o SKU']);
+                exit;
+            }
+            
+            $categoria_id = intval($dados['categoria_id']);
+            $empresa_id = intval($dados['empresa_id']);
+            
+            // Verificar se categoria existe
+            $stmt = $conn->prepare('SELECT nome FROM categorias_materiais WHERE id = ?');
+            $stmt->bind_param('i', $categoria_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result->num_rows === 0) {
+                echo json_encode(['sucesso' => false, 'erro' => 'Categoria não encontrada']);
+                exit;
+            }
+            
+            // Verificar se empresa existe
+            $stmt = $conn->prepare('SELECT nome FROM empresas_terceirizadas WHERE id = ?');
+            $stmt->bind_param('i', $empresa_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result->num_rows === 0) {
+                echo json_encode(['sucesso' => false, 'erro' => 'Empresa não encontrada']);
+                exit;
+            }
+            
+            $sku = gerarCodigoSKU($conn, $categoria_id, $empresa_id);
+            
+            if ($sku) {
+                echo json_encode(['sucesso' => true, 'sku' => $sku]);
+            } else {
+                echo json_encode(['sucesso' => false, 'erro' => 'Erro ao gerar SKU']);
+            }
+            
+        } catch (Exception $e) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro interno: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+    
+    if ($acao === 'criar') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem cadastrar materiais']);
+            exit;
+        }
+        
+        // Verificar se empresa está permitida
+        if ($_SESSION['empresas_permitidas'] !== 'ALL' && !in_array($dados['empresa_id'], $_SESSION['empresas_permitidas'])) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Empresa não autorizada']);
+            exit;
+        }
+        
+        // Gerar SKU se não fornecido
+        $codigo_sku = $dados['codigo_sku'];
+        if (empty($codigo_sku)) {
+            $codigo_sku = gerarCodigoSKU($conn, $dados['categoria_id'], $dados['empresa_id']);
+        }
+        
+        // Verificar se SKU já existe
+        $stmt_check = $conn->prepare('SELECT id FROM materiais WHERE codigo_sku = ?');
+        $stmt_check->bind_param('s', $codigo_sku);
+        $stmt_check->execute();
+        if ($stmt_check->get_result()->num_rows > 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Código SKU já existe']);
+            exit;
+        }
+        
+        // Garantir que as dependências existam (com estrutura correta)
+        $conn->query("INSERT IGNORE INTO categorias_materiais (id, nome, descricao) VALUES (1, 'Limpeza', 'Produtos de limpeza')");
+        $conn->query("INSERT IGNORE INTO unidades_medida (id, descricao, simbolo) VALUES (1, 'Unidade', 'un')");
+        $conn->query("INSERT IGNORE INTO locais_armazenamento (id, nome, descricao, ativo) VALUES (1, 'Almoxarifado Central', 'Depósito principal', 1)");
+        
+        // Verificar se empresa existe
+        $result = $conn->query("SELECT COUNT(*) as total FROM empresas_terceirizadas WHERE id = {$dados['empresa_id']}");
+        if ($result->fetch_assoc()['total'] == 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Empresa não encontrada']);
+            exit;
+        }
+        
+        // Preparar valores (baseado na estrutura real)
+        $categoria_id = $dados['categoria_id'] ?? 2; // Ferramentas existe
+        $unidade_id = $dados['unidade_medida_id'] ?? 1;
+        $local_id = $dados['local_id'] ?? 1;
+        $estoque_atual = $dados['estoque_atual'] ?? 0;
+        $ponto_reposicao = $dados['ponto_reposicao'] ?? 0;
+        $estoque_maximo = $dados['estoque_maximo'] ?? 0;
+        
+        // Inserir material (campos obrigatórios baseados na estrutura)
+        $stmt = $conn->prepare('INSERT INTO materiais (nome, codigo_sku, categoria_id, unidade_medida_id, empresa_id, local_id, estoque_atual, ponto_reposicao, estoque_maximo, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
+        $stmt->bind_param('ssiiiiddd', 
+            $dados['nome'], 
+            $codigo_sku, 
+            $categoria_id,
+            $unidade_id, 
+            $dados['empresa_id'], 
+            $local_id,
+            $estoque_atual,
+            $ponto_reposicao,
+            $estoque_maximo
+        );
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Material cadastrado', 'sku_gerado' => $codigo_sku]);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar: ' . $conn->error]);
+        }
+        exit;
+    }
+}
+
+// ATUALIZAR PRÓPRIO PERFIL (qualquer usuário logado pode fazer)
+if ($tipo === 'usuarios' && $acao === 'atualizar_perfil') {
+    // Verificar se está logado
+    if (!isset($_SESSION['usuario_id'])) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Usuário não autenticado']);
+        exit;
+    }
+    
+    // Verificar se está tentando atualizar seu próprio perfil
+    if ($_SESSION['usuario_id'] != $dados['id']) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Você só pode atualizar seu próprio perfil']);
+        exit;
+    }
+    
+    // Buscar usuário atual
+    $stmt = $conn->prepare('SELECT senha, email FROM usuarios WHERE id = ?');
+    $stmt->bind_param('i', $dados['id']);
+    $stmt->execute();
+    $usuario_atual = $stmt->get_result()->fetch_assoc();
+    
+    if (!$usuario_atual) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Usuário não encontrado']);
+        exit;
+    }
+    
+    // Verificar senha atual
+    if (!password_verify($dados['senha_atual'], $usuario_atual['senha'])) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Senha atual incorreta']);
+        exit;
+    }
+    
+    // Verificar se email já está em uso por outro usuário
+    if ($dados['email'] != $usuario_atual['email']) {
+        $stmt = $conn->prepare('SELECT id FROM usuarios WHERE email = ? AND id != ?');
+        $stmt->bind_param('si', $dados['email'], $dados['id']);
+        $stmt->execute();
+        if ($stmt->get_result()->num_rows > 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Este email já está em uso']);
+            exit;
+        }
+    }
+    
+    // Atualizar dados
+    if ($dados['nova_senha']) {
+        // Atualizar com nova senha
+        $nova_senha_hash = password_hash($dados['nova_senha'], PASSWORD_DEFAULT);
+        $stmt = $conn->prepare('UPDATE usuarios SET nome = ?, email = ?, senha = ? WHERE id = ?');
+        $stmt->bind_param('sssi', $dados['nome'], $dados['email'], $nova_senha_hash, $dados['id']);
+    } else {
+        // Atualizar sem mudar senha
+        $stmt = $conn->prepare('UPDATE usuarios SET nome = ?, email = ? WHERE id = ?');
+        $stmt->bind_param('ssi', $dados['nome'], $dados['email'], $dados['id']);
+    }
+    
+    if ($stmt->execute()) {
+        echo json_encode(['sucesso' => true, 'mensagem' => 'Perfil atualizado com sucesso']);
+    } else {
+        echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar perfil']);
+    }
+    exit;
+}
+
+// USUÁRIOS (apenas para admin)
+if ($tipo === 'usuarios') {
+    if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+        echo json_encode(['sucesso' => false, 'erro' => 'Acesso negado! Apenas administradores podem gerenciar usuários.']);
+        exit;
+    }
+    
+    if ($acao === 'listar' || $acao === 'listar_completo') {
+        $query = 'SELECT u.id, u.nome, u.email, u.ativo, u.departamento, p.nome as perfil_nome, p.id as perfil_id,
+                         GROUP_CONCAT(e.nome SEPARATOR ", ") as empresas_nomes 
+                  FROM usuarios u 
+                  LEFT JOIN perfis_acesso p ON u.perfil_id = p.id 
+                  LEFT JOIN usuarios_empresas ue ON u.id = ue.usuario_id 
+                  LEFT JOIN empresas_terceirizadas e ON ue.empresa_id = e.id 
+                  GROUP BY u.id ORDER BY u.nome';
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+    
+    if ($acao === 'criar') {
+        $stmt = $conn->prepare('INSERT INTO usuarios (nome, email, senha, perfil_id, departamento) VALUES (?, ?, ?, ?, ?)');
+        $senha_hash = password_hash($dados['senha'], PASSWORD_DEFAULT);
+        $stmt->bind_param('sssis', $dados['nome'], $dados['email'], $senha_hash, $dados['perfil_id'], $dados['departamento']);
+        
+        if ($stmt->execute()) {
+            $usuario_id = $conn->insert_id;
+            
+            // Vincular empresas se não for admin
+            if ($dados['perfil_id'] > 1 && !empty($dados['empresas_vinculadas'])) {
+                foreach ($dados['empresas_vinculadas'] as $empresa_id) {
+                    $stmt2 = $conn->prepare('INSERT INTO usuarios_empresas (usuario_id, empresa_id) VALUES (?, ?)');
+                    $stmt2->bind_param('ii', $usuario_id, $empresa_id);
+                    $stmt2->execute();
+                }
+            }
+            
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Usuário cadastrado']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar']);
+        }
+        exit;
+    }
+    
+    if ($acao === 'toggle_status') {
+        $stmt = $conn->prepare('UPDATE usuarios SET ativo = ? WHERE id = ?');
+        $stmt->bind_param('ii', $dados['ativo'], $dados['id']);
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Status atualizado']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar']);
+        }
+        exit;
+    }
+    
+    if ($acao === 'buscar') {
+        $query = 'SELECT u.*, p.nome as perfil_nome, GROUP_CONCAT(ue.empresa_id) as empresas_ids
+                  FROM usuarios u 
+                  LEFT JOIN perfis_acesso p ON u.perfil_id = p.id 
+                  LEFT JOIN usuarios_empresas ue ON u.id = ue.usuario_id 
+                  WHERE u.id = ? GROUP BY u.id';
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('i', $dados['id']);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $usuario = $result->fetch_assoc();
+            echo json_encode(['sucesso' => true, 'dados' => $usuario]);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Usuário não encontrado']);
+        }
+        exit;
+    }
+    
+    if ($acao === 'atualizar') {
+        // Atualizar dados básicos
+        $stmt = $conn->prepare('UPDATE usuarios SET nome=?, email=?, perfil_id=?, departamento=? WHERE id=?');
+        $stmt->bind_param('ssisi', $dados['nome'], $dados['email'], $dados['perfil_id'], $dados['departamento'], $dados['id']);
+        
+        if ($stmt->execute()) {
+            // Remover vínculos antigos
+            $stmt2 = $conn->prepare('DELETE FROM usuarios_empresas WHERE usuario_id = ?');
+            $stmt2->bind_param('i', $dados['id']);
+            $stmt2->execute();
+            
+            // Adicionar novos vínculos se não for admin
+            if ($dados['perfil_id'] > 1 && !empty($dados['empresas_vinculadas'])) {
+                foreach ($dados['empresas_vinculadas'] as $empresa_id) {
+                    $stmt3 = $conn->prepare('INSERT INTO usuarios_empresas (usuario_id, empresa_id) VALUES (?, ?)');
+                    $stmt3->bind_param('ii', $dados['id'], $empresa_id);
+                    $stmt3->execute();
+                }
+            }
+            
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Usuário atualizado']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar']);
+        }
+        exit;
+    }
+    
+    // Atualizar próprio perfil (qualquer usuário logado)
+    if ($acao === 'atualizar_perfil') {
+        // Verificar se está logado
+        if (!isset($_SESSION['usuario_id'])) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Usuário não autenticado']);
+            exit;
+        }
+        
+        // Verificar se está tentando atualizar seu próprio perfil
+        if ($_SESSION['usuario_id'] != $dados['id']) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Você só pode atualizar seu próprio perfil']);
+            exit;
+        }
+        
+        // Buscar usuário atual
+        $stmt = $conn->prepare('SELECT senha, email FROM usuarios WHERE id = ?');
+        $stmt->bind_param('i', $dados['id']);
+        $stmt->execute();
+        $usuario_atual = $stmt->get_result()->fetch_assoc();
+        
+        if (!$usuario_atual) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Usuário não encontrado']);
+            exit;
+        }
+        
+        // Verificar senha atual
+        if (!password_verify($dados['senha_atual'], $usuario_atual['senha'])) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Senha atual incorreta']);
+            exit;
+        }
+        
+        // Verificar se email já está em uso por outro usuário
+        if ($dados['email'] != $usuario_atual['email']) {
+            $stmt = $conn->prepare('SELECT id FROM usuarios WHERE email = ? AND id != ?');
+            $stmt->bind_param('si', $dados['email'], $dados['id']);
+            $stmt->execute();
+            if ($stmt->get_result()->num_rows > 0) {
+                echo json_encode(['sucesso' => false, 'erro' => 'Este email já está em uso']);
+                exit;
+            }
+        }
+        
+        // Atualizar dados
+        if ($dados['nova_senha']) {
+            // Atualizar com nova senha
+            $nova_senha_hash = password_hash($dados['nova_senha'], PASSWORD_DEFAULT);
+            $stmt = $conn->prepare('UPDATE usuarios SET nome = ?, email = ?, senha = ? WHERE id = ?');
+            $stmt->bind_param('sssi', $dados['nome'], $dados['email'], $nova_senha_hash, $dados['id']);
+        } else {
+            // Atualizar sem mudar senha
+            $stmt = $conn->prepare('UPDATE usuarios SET nome = ?, email = ? WHERE id = ?');
+            $stmt->bind_param('ssi', $dados['nome'], $dados['email'], $dados['id']);
+        }
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Perfil atualizado com sucesso']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar perfil']);
+        }
+        exit;
+    }
+    
+    if ($acao === 'por_empresa') {
+        $empresa_id = $_GET['empresa_id'] ?? 0;
+        
+        if (!$empresa_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID da empresa é obrigatório']);
+            exit;
+        }
+        
+        // Buscar usuários vinculados à empresa (operadores, gestores e administradores)
+        $query = 'SELECT u.id, u.nome, u.email 
+                  FROM usuarios u 
+                  JOIN usuarios_empresas ue ON u.id = ue.usuario_id 
+                  WHERE ue.empresa_id = ? AND u.ativo = 1 AND u.perfil_id IN (1, 2, 3)
+                  ORDER BY u.nome';
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('i', $empresa_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+}
+
+// RELATÓRIOS
+if ($tipo === 'relatorios') {
+    // 1. Resumo Geral (Dashboard)
+    if ($acao === 'resumo_geral') {
+        $total_empresas = $conn->query('SELECT COUNT(*) as total FROM empresas_terceirizadas WHERE status = "Ativa"')->fetch_assoc()['total'];
+        $total_materiais = $conn->query('SELECT COUNT(*) as total FROM materiais WHERE ativo = 1')->fetch_assoc()['total'];
+        $estoque_baixo = $conn->query('SELECT COUNT(*) as total FROM materiais WHERE ativo = 1 AND estoque_atual < ponto_reposicao')->fetch_assoc()['total'];
+        
+        // Calcular valor total do estoque
+        $valor_total = $conn->query('SELECT SUM(estoque_atual * valor_unitario) as total FROM materiais WHERE ativo = 1')->fetch_assoc()['total'];
+        
+        echo json_encode([
+            'sucesso' => true,
+            'dados' => [
+                'total_empresas' => $total_empresas,
+                'total_materiais' => $total_materiais,
+                'estoque_baixo' => $estoque_baixo,
+                'valor_total_estoque' => 'R$ ' . number_format($valor_total ?? 0, 2, ',', '.')
+            ]
+        ]);
+        exit;
+    }
+
+    // 2. Estoque por Empresa
+    if ($acao === 'estoque_por_empresa') {
+        $query = 'SELECT e.nome, 
+                         COUNT(m.id) as total_materiais, 
+                         SUM(m.estoque_atual) as total_estoque,
+                         SUM(m.estoque_atual * m.valor_unitario) as valor_total
+                  FROM empresas_terceirizadas e
+                  LEFT JOIN materiais m ON e.id = m.empresa_id AND m.ativo = 1
+                  WHERE e.status = "Ativa"';
+        
+        $query = aplicarFiltroEmpresa($query, 'e');
+        $query .= ' GROUP BY e.id ORDER BY e.nome';
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 3. Movimentações (Entradas e Saídas)
+    if ($acao === 'movimentacoes') {
+        $periodo = $_GET['periodo'] ?? 30; // Dias
+        $tipo_mov = $_GET['tipo_mov'] ?? 'todos';
+        $empresa_id = $_GET['empresa_id'] ?? '';
+        $material_id = $_GET['material_id'] ?? '';
+        
+        // Se for filtro por material, pegar histórico completo (ignorar periodo padrão de 30 dias se não especificado explicitamente)
+        if ($material_id && !isset($_GET['periodo'])) {
+            $data_inicio = '2000-01-01';
+        } else {
+            $data_inicio = date('Y-m-d', strtotime("-$periodo days"));
+        }
+        
+        $dados = [];
+        
+        // Entradas
+        if ($tipo_mov === 'todos' || $tipo_mov === 'entrada') {
+            $query = "SELECT 'Entrada' as tipo, me.data_entrada as data, m.nome as material, e.nome as empresa, me.quantidade, u.nome as responsavel
+                      FROM movimentacoes_entrada me
+                      JOIN materiais m ON me.material_id = m.id
+                      LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                      LEFT JOIN usuarios u ON me.responsavel_id = u.id
+                      WHERE me.data_entrada >= '$data_inicio'";
+            
+            if ($empresa_id) $query .= " AND m.empresa_id = " . intval($empresa_id);
+            if ($material_id) $query .= " AND me.material_id = " . intval($material_id);
+            
+            $query = aplicarFiltroEmpresa($query, 'm');
+            
+            $result = $conn->query($query);
+            if ($result) $dados = array_merge($dados, $result->fetch_all(MYSQLI_ASSOC));
+        }
+        
+        // Saídas
+        if ($tipo_mov === 'todos' || $tipo_mov === 'saida') {
+            $query = "SELECT 'Saída' as tipo, ms.data_saida as data, m.nome as material, e.nome as empresa, ms.quantidade, '-' as responsavel
+                      FROM movimentacoes_saida ms
+                      JOIN materiais m ON ms.material_id = m.id
+                      LEFT JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
+                      WHERE ms.data_saida >= '$data_inicio'";
+            
+            if ($empresa_id) $query .= " AND ms.empresa_solicitante_id = " . intval($empresa_id);
+            if ($material_id) $query .= " AND ms.material_id = " . intval($material_id);
+            
+            // Nota: Saída pode ser vista por quem tem acesso à empresa solicitante OU dona do material? 
+            // Simplificação: filtro pela empresa dona do material (m.empresa_id)
+            $query = aplicarFiltroEmpresa($query, 'm'); 
+            
+            $result = $conn->query($query);
+            if ($result) $dados = array_merge($dados, $result->fetch_all(MYSQLI_ASSOC));
+        }
+        
+        // Ordenar por data decrescente
+        usort($dados, function($a, $b) {
+            return strtotime($b['data']) - strtotime($a['data']);
+        });
+        
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 4. Consumo por Empresa (Saídas)
+    if ($acao === 'consumo_por_empresa') {
+        $query = "SELECT e.nome as empresa, COUNT(ms.id) as total_saidas, SUM(ms.quantidade) as total_itens
+                  FROM movimentacoes_saida ms
+                  JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
+                  WHERE ms.data_saida >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        
+        $query = aplicarFiltroEmpresa($query, 'ms');
+        $query .= " GROUP BY e.id ORDER BY total_itens DESC";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 5. Inventário Completo
+    if ($acao === 'inventario') {
+        $query = "SELECT m.id, m.nome, m.codigo_sku, e.nome as empresa, c.nome as categoria, 
+                         m.estoque_atual, m.unidade_medida_id, l.nome as local,
+                         m.valor_unitario, (m.estoque_atual * m.valor_unitario) as valor_total
+                  FROM materiais m
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                  LEFT JOIN categorias_materiais c ON m.categoria_id = c.id
+                  LEFT JOIN locais_armazenamento l ON m.local_id = l.id
+                  WHERE m.ativo = 1";
+        
+        $query = aplicarFiltroEmpresa($query, 'm');
+        
+        if (isset($_GET['empresa_id']) && !empty($_GET['empresa_id'])) {
+            $query .= " AND m.empresa_id = " . intval($_GET['empresa_id']);
+        }
+        
+        $query .= " ORDER BY e.nome, m.nome";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 6. Baixo Estoque (já existente, mas ajustado para filtro)
+    if ($acao === 'estoque_baixo') {
+        $query = "SELECT m.nome, m.codigo_sku, e.nome as empresa_nome, m.estoque_atual, m.ponto_reposicao,
+                         ROUND((m.estoque_atual / m.ponto_reposicao) * 100, 1) as percentual_ponto
+                  FROM materiais m
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                  WHERE m.ativo = 1 AND m.estoque_atual < m.ponto_reposicao";
+        
+        $query = aplicarFiltroEmpresa($query, 'm');
+        
+        if (isset($_GET['empresa_id']) && !empty($_GET['empresa_id'])) {
+            $query .= " AND m.empresa_id = " . intval($_GET['empresa_id']);
+        }
+        
+        $query .= " ORDER BY percentual_ponto ASC";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+
+    // 7. Sobressalência (Estoque Alto)
+    if ($acao === 'sobressalencia') {
+        $query = "SELECT m.nome, m.codigo_sku, e.nome as empresa_nome, m.estoque_atual, m.estoque_maximo,
+                         ROUND((m.estoque_atual / m.estoque_maximo) * 100, 1) as percentual_maximo
+                  FROM materiais m
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
+                  WHERE m.ativo = 1 AND m.estoque_atual > m.estoque_maximo";
+        
+        $query = aplicarFiltroEmpresa($query, 'm');
+        
+        if (isset($_GET['empresa_id']) && !empty($_GET['empresa_id'])) {
+            $query .= " AND m.empresa_id = " . intval($_GET['empresa_id']);
+        }
+        
+        $query .= " ORDER BY percentual_maximo DESC";
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+}
+
+// ENTRADA
+if ($tipo === 'entrada') {
+    if ($acao === 'listar') {
+        $query = 'SELECT me.*, m.nome as material_nome, u.nome as responsavel_nome, l.nome as local_nome 
+                  FROM movimentacoes_entrada me 
+                  LEFT JOIN materiais m ON me.material_id = m.id 
+                  LEFT JOIN usuarios u ON me.responsavel_id = u.id 
+                  LEFT JOIN locais_armazenamento l ON me.local_destino_id = l.id 
+                  ORDER BY me.data_entrada DESC LIMIT 50';
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+    
+    if ($acao === 'criar') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem registrar entradas']);
+            exit;
+        }
+        
+        $material_id = intval($dados['material_id']);
+        $quantidade = floatval($dados['quantidade']);
+        
+        if (!$material_id || $quantidade <= 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material e quantidade obrigatórios']);
+            exit;
+        }
+        
+        // Verificar se material existe e está ativo
+        $stmt = $conn->prepare('SELECT id, estoque_atual FROM materiais WHERE id = ? AND ativo = 1');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $material = $stmt->get_result()->fetch_assoc();
+        
+        if (!$material) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material não encontrado']);
+            exit;
+        }
+        
+        $conn->begin_transaction();
+        try {
+            // Inserir movimentação
+            $stmt = $conn->prepare('INSERT INTO movimentacoes_entrada (data_entrada, material_id, quantidade, nota_fiscal, responsavel_id, local_destino_id, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            // s=string, i=int, d=double
+            // data(s), material(i), qtd(d), nota(s), resp(i), local(i), obs(s)
+            $stmt->bind_param('sidisis', $dados['data_entrada'], $material_id, $quantidade, $dados['nota_fiscal'], $dados['responsavel_id'], $dados['local_destino_id'], $dados['observacao']);
+            $stmt->execute();
+            
+            // Atualizar estoque
+            $novo_estoque = $material['estoque_atual'] + $quantidade;
+            $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+            $stmt->bind_param('di', $novo_estoque, $material_id);
+            $stmt->execute();
+            
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Entrada registrada e estoque atualizado']);
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar entrada: ' . $e->getMessage()]);
+        }
+    }
+}
+
+// SAÍDA DE MATERIAIS
+if ($tipo === 'saida') {
+    if ($acao === 'listar') {
+        $query = 'SELECT ms.*, m.nome as material_nome, e.nome as empresa_nome
+                  FROM movimentacoes_saida ms 
+                  LEFT JOIN materiais m ON ms.material_id = m.id 
+                  LEFT JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
+                  ORDER BY ms.data_saida DESC LIMIT 50';
+        
+        $result = $conn->query($query);
+        $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+        echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        exit;
+    }
+    
+    if ($acao === 'criar') {
+        $material_id = intval($dados['material_id']);
+        $quantidade = floatval($dados['quantidade']);
+        
+        if (!$material_id || $quantidade <= 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material e quantidade obrigatórios']);
+            exit;
+        }
+        
+        $conn->begin_transaction();
+        try {
+            // Verificar estoque disponível
+            $stmt = $conn->prepare('SELECT estoque_atual FROM materiais WHERE id = ?');
+            $stmt->bind_param('i', $material_id);
+            $stmt->execute();
+            $material = $stmt->get_result()->fetch_assoc();
+            
+            if (!$material) {
+                throw new Exception('Material não encontrado');
+            }
+            
+            if ($material['estoque_atual'] < $quantidade) {
+                throw new Exception('Estoque insuficiente. Disponível: ' . $material['estoque_atual']);
+            }
+            
+            // Registrar saída
+            $stmt = $conn->prepare('INSERT INTO movimentacoes_saida 
+                (data_saida, material_id, quantidade, empresa_solicitante_id, finalidade, observacao) 
+                VALUES (?, ?, ?, ?, ?, ?)');
+            
+            $data_saida = $dados['data_saida'];
+            $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
+            $finalidade = $dados['finalidade'] ?? '';
+            $observacao = $dados['observacao'] ?? '';
+            
+            // data(s), material(i), qtd(d), empresa(i), fin(s), obs(s)
+            $stmt->bind_param('sidiss', 
+                $data_saida, 
+                $material_id, 
+                $quantidade, 
+                $empresa_id, 
+                $finalidade, 
+                $observacao
+            );
+            $stmt->execute();
+            
+            // Atualizar estoque
+            $novo_estoque = $material['estoque_atual'] - $quantidade;
+            $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+            $stmt->bind_param('di', $novo_estoque, $material_id);
+            $stmt->execute();
+            
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Saída registrada e estoque atualizado']);
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar saída: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+}
+
+$conn->close();
+error_log("API Debug - Tipo: $tipo, Ação: $acao");
+echo json_encode(['sucesso' => false, 'erro' => 'Ação não encontrada', 'debug' => ['tipo' => $tipo, 'acao' => $acao, 'get_params' => $_GET]]);
+?>
