@@ -1209,23 +1209,40 @@ if ($tipo === 'materiais') {
             exit;
         }
 
-        // Buscar todas as entradas deste material para calcular estoque por local
+        // Buscar estoque por local considerando entradas e saídas
         $query = "SELECT
                     l.id as local_id,
                     l.nome as local_nome,
-                    COALESCE(SUM(me.quantidade), 0) as entrada_total,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN me.local_destino_id = l.id THEN me.quantidade
+                            ELSE 0
+                        END
+                    ), 0) as entrada_no_local,
                     COALESCE(SUM(
                         CASE
                             WHEN ms.local_origem_id = l.id THEN ms.quantidade
                             ELSE 0
                         END
-                    ), 0) as saida_do_local
+                    ), 0) as saida_do_local,
+                    (COALESCE(SUM(
+                        CASE
+                            WHEN me.local_destino_id = l.id THEN me.quantidade
+                            ELSE 0
+                        END
+                    ), 0) - COALESCE(SUM(
+                        CASE
+                            WHEN ms.local_origem_id = l.id THEN ms.quantidade
+                            ELSE 0
+                        END
+                    ), 0)) as estoque_no_local
                   FROM locais_armazenamento l
-                  LEFT JOIN movimentacoes_entrada me ON l.id = me.local_destino_id AND me.material_id = ?
-                  LEFT JOIN movimentacoes_saida ms ON ms.material_id = ?
+                  LEFT JOIN movimentacoes_entrada me ON me.material_id = ? AND me.local_destino_id = l.id
+                  LEFT JOIN movimentacoes_saida ms ON ms.material_id = ? AND ms.local_origem_id = l.id
                   WHERE l.ativo = 1
+                    AND (me.local_destino_id IS NOT NULL OR ms.local_origem_id IS NOT NULL) -- Apenas locais com movimentação
                   GROUP BY l.id, l.nome
-                  HAVING entrada_total > saida_do_local  -- Apenas locais com estoque positivo
+                  HAVING estoque_no_local > 0  -- Apenas locais com estoque positivo
                   ORDER BY l.nome";
 
         $stmt = $conn->prepare($query);
@@ -1235,12 +1252,11 @@ if ($tipo === 'materiais') {
 
         $estoques = [];
         while ($row = $result->fetch_assoc()) {
-            $estoque = $row['entrada_total'] - $row['saida_do_local'];
-            if ($estoque > 0) {
+            if ($row['estoque_no_local'] > 0) {
                 $estoques[] = [
                     'local_id' => $row['local_id'],
                     'local_nome' => $row['local_nome'],
-                    'estoque' => $estoque
+                    'estoque' => $row['estoque_no_local']
                 ];
             }
         }
