@@ -599,10 +599,35 @@ if ($tipo === 'locais') {
 
     if ($acao === 'excluir') {
         $id = (int)$_GET['id'];
+
+        // Verificar se o local tem vínculos antes de excluir
+        $check_stmt = $conn->prepare("
+            SELECT
+                (SELECT COUNT(*) FROM materiais WHERE local_id = ?) as materiais_count,
+                (SELECT COUNT(*) FROM movimentacoes_entrada WHERE local_destino_id = ?) as entradas_count,
+                (SELECT COUNT(*) FROM movimentacoes_saida WHERE local_origem_id = ?) as saidas_count
+        ");
+        $check_stmt->bind_param('iii', $id, $id, $id);
+        $check_stmt->execute();
+        $result = $check_stmt->get_result();
+        $vinculos = $result->fetch_assoc();
+
+        if ($vinculos['materiais_count'] > 0 || $vinculos['entradas_count'] > 0 || $vinculos['saidas_count'] > 0) {
+            $msg_erro = "Não é possível excluir o local. Vínculos encontrados:\n";
+            if ($vinculos['materiais_count'] > 0) $msg_erro .= "- {$vinculos['materiais_count']} material(is) com localização definida\n";
+            if ($vinculos['entradas_count'] > 0) $msg_erro .= "- {$vinculos['entradas_count']} movimentação(ões) de entrada\n";
+            if ($vinculos['saidas_count'] > 0) $msg_erro .= "- {$vinculos['saidas_count']} movimentação(ões) de saída\n";
+
+            $msg_erro .= "\nPara excluir o local, remova os vínculos primeiro.";
+
+            echo json_encode(['sucesso' => false, 'erro' => $msg_erro]);
+            exit;
+        }
+
         // Soft delete
         $stmt = $conn->prepare("UPDATE locais_armazenamento SET ativo = 0 WHERE id = ?");
         $stmt->bind_param('i', $id);
-        
+
         if ($stmt->execute()) {
             echo json_encode(['sucesso' => true, 'mensagem' => 'Local excluído com sucesso']);
         } else {
@@ -683,11 +708,39 @@ if ($tipo === 'auth' && $acao === 'login') {
 
 // EMPRESAS
 if ($tipo === 'empresas') {
+    if ($acao === 'detalhes') {
+        $empresa_id = $_GET['empresa_id'] ?? 0;
+
+        if (!$empresa_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID da empresa é obrigatório']);
+            exit;
+        }
+
+        // Verificar permissão de empresa
+        if ($_SESSION['empresas_permitidas'] !== 'ALL' && !in_array($empresa_id, $_SESSION['empresas_permitidas'])) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Sem permissão para visualizar esta empresa']);
+            exit;
+        }
+
+        $stmt = $conn->prepare('SELECT id, nome, tipo_servico, numero_contrato, cnpj, telefone, email, status FROM empresas_terceirizadas WHERE id = ?');
+        $stmt->bind_param('i', $empresa_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($result->num_rows === 1) {
+            $empresa = $result->fetch_assoc();
+            echo json_encode(['sucesso' => true, 'dados' => $empresa]);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Empresa não encontrada']);
+        }
+        exit;
+    }
+
     if ($acao === 'listar') {
         $query = 'SELECT id, nome, tipo_servico, numero_contrato FROM empresas_terceirizadas WHERE status = "Ativa"';
         $query = aplicarFiltroEmpresa($query);
         $query .= ' LIMIT 50';
-        
+
         $result = $conn->query($query);
         $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
         echo json_encode(['sucesso' => true, 'dados' => $dados]);
@@ -699,14 +752,20 @@ if ($tipo === 'empresas') {
             echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem cadastrar empresas']);
             exit;
         }
-        
-        $stmt = $conn->prepare('INSERT INTO empresas_terceirizadas (nome, tipo_servico, numero_contrato, responsavel_id) VALUES (?, ?, ?, 1)');
-        $stmt->bind_param('sss', $dados['nome'], $dados['tipo_servico'], $dados['numero_contrato']);
-        
+
+        // Inclusão dos campos adicionais que podem ter sido enviados
+        $cnpj = $dados['cnpj'] ?? '';
+        $telefone = $dados['telefone'] ?? '';
+        $email = $dados['email'] ?? '';
+        $responsavel_id = $_SESSION['usuario_id'] ?? 1; // Usar ID do usuário logado ou padrão 1
+
+        $stmt = $conn->prepare('INSERT INTO empresas_terceirizadas (nome, tipo_servico, numero_contrato, cnpj, telefone, email, responsavel_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, "Ativa")');
+        $stmt->bind_param('ssssssi', $dados['nome'], $dados['tipo_servico'], $dados['numero_contrato'], $cnpj, $telefone, $email, $responsavel_id);
+
         if ($stmt->execute()) {
             echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa cadastrada']);
         } else {
-            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar']);
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao salvar: ' . $stmt->error]);
         }
         exit;
     }

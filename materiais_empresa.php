@@ -199,6 +199,12 @@ if ($empresa_id === 0) {
         </div>
 
         <div class="content">
+            <div id="detalhes-empresa">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Carregando informações da empresa...
+                </div>
+            </div>
             <div id="alerta"></div>
             <div id="lista-materiais">
                 <div class="loading">
@@ -218,7 +224,7 @@ if ($empresa_id === 0) {
             alerta.className = `alert alert-${tipo}`;
             alerta.innerHTML = `<strong>${tipo === 'error' ? 'Erro:' : tipo === 'success' ? 'Sucesso:' : 'Atenção:'}</strong> ${mensagem}`;
             alerta.style.display = 'block';
-            
+
             setTimeout(() => {
                 alerta.style.display = 'none';
             }, 5000);
@@ -231,12 +237,12 @@ if ($empresa_id === 0) {
                     method: dados ? 'POST' : 'GET',
                     headers: { 'Content-Type': 'application/json' }
                 };
-                
+
                 if (dados) opcoes.body = JSON.stringify(dados);
-                
+
                 const resposta = await fetch(url, opcoes);
                 const texto = await resposta.text();
-                
+
                 try {
                     return JSON.parse(texto);
                 } catch (jsonError) {
@@ -244,10 +250,43 @@ if ($empresa_id === 0) {
                     console.error('Resposta:', texto);
                     return { sucesso: false, erro: 'Resposta inválida do servidor' };
                 }
-                
+
             } catch (erro) {
                 console.error('Erro na requisição:', erro);
                 return { sucesso: false, erro: 'Erro de conexão' };
+            }
+        }
+
+        async function carregarDetalhesEmpresa() {
+            const container = document.getElementById('detalhes-empresa');
+
+            const resultado = await chamarAPI('empresas', 'detalhes', null, `&empresa_id=${empresaId}`);
+
+            if (resultado.sucesso && resultado.dados) {
+                const empresa = resultado.dados;
+
+                let html = `
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                        <h2 style="margin-top: 0; color: #1e293b;">Informações da Empresa</h2>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            <div><strong>Nome:</strong> <span>${empresa.nome || '-'}</span></div>
+                            <div><strong>Tipo de Serviço:</strong> <span>${empresa.tipo_servico || '-'}</span></div>
+                            <div><strong>Número do Contrato:</strong> <span>${empresa.numero_contrato || '-'}</span></div>
+                            <div><strong>CNPJ:</strong> <span>${empresa.cnpj || '-'}</span></div>
+                            <div><strong>Telefone:</strong> <span>${empresa.telefone || '-'}</span></div>
+                            <div><strong>Email:</strong> <span>${empresa.email || '-'}</span></div>
+                            <div><strong>Status:</strong> <span style="color: ${empresa.status === 'Ativa' ? '#10b981' : '#ef4444'}; font-weight: bold;">${empresa.status || '-'}</span></div>
+                        </div>
+                    </div>
+                `;
+
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `
+                    <div class="alert alert-error">
+                        <strong>Erro:</strong> ${resultado.erro || 'Não foi possível carregar as informações da empresa'}
+                    </div>
+                `;
             }
         }
 
@@ -346,8 +385,11 @@ if ($empresa_id === 0) {
             }
         }
 
-        // Carregar materiais ao abrir a página
-        window.addEventListener('load', carregarMateriais);
+        // Carregar informações da empresa e materiais ao abrir a página
+        window.addEventListener('load', async () => {
+            await carregarDetalhesEmpresa();
+            carregarMateriais();
+        });
     </script>
 </body>
 </html>

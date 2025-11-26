@@ -1779,13 +1779,19 @@
                     document.getElementById('mat-empresa').innerHTML = html;
                 }
                 
-                // Carregar locais (dados fixos por enquanto)
-                const locaisHtml = `
-                    <option value="1">Almoxarifado Central</option>
-                    <option value="2">Almoxarifado Limpeza</option>
-                    <option value="3">Almoxarifado Manutenção</option>
-                    <option value="4">Almoxarifado Escritório</option>
-                `;
+                // Carregar locais dinamicamente
+                const locais = await chamarAPI('locais', 'listar');
+                let locaisHtml = '<option value="">Selecione o local...</option>';
+
+                if (locais.sucesso && locais.dados) {
+                    locais.dados.forEach(local => {
+                        locaisHtml += `<option value="${local.id}">${local.nome}</option>`;
+                    });
+                } else {
+                    // Caso não tenha locais, mostrar mensagem
+                    locaisHtml += '<option value="">Nenhum local encontrado</option>';
+                }
+
                 if (document.getElementById('mat-local')) {
                     document.getElementById('mat-local').innerHTML = locaisHtml;
                 }
