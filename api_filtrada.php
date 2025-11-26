@@ -1423,7 +1423,52 @@ if ($tipo === 'usuarios') {
             echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar']);
         }
     }
-    
+
+    if ($acao === 'excluir') {
+        // Verificar se é administrador
+        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Acesso negado! Apenas administradores podem excluir usuários.']);
+            exit;
+        }
+
+        $usuario_id = $dados['id'] ?? 0;
+        if (!$usuario_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID do usuário não informado']);
+            exit;
+        }
+
+        // Impedir que o administrador se exclua a si mesmo
+        if ($usuario_id == $_SESSION['usuario_id']) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Você não pode excluir sua própria conta']);
+            exit;
+        }
+
+        // Começar transação para garantir consistência
+        $conn->begin_transaction();
+        try {
+            // Remover vínculos com empresas
+            $stmt = $conn->prepare('DELETE FROM usuarios_empresas WHERE usuario_id = ?');
+            $stmt->bind_param('i', $usuario_id);
+            $stmt->execute();
+
+            // Remover o usuário
+            $stmt = $conn->prepare('DELETE FROM usuarios WHERE id = ?');
+            $stmt->bind_param('i', $usuario_id);
+
+            if ($stmt->execute() && $stmt->affected_rows > 0) {
+                $conn->commit();
+                echo json_encode(['sucesso' => true, 'mensagem' => 'Usuário excluído com sucesso']);
+            } else {
+                $conn->rollback();
+                echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir usuário ou usuário não encontrado']);
+            }
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro na exclusão: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
     if ($acao === 'por_empresa') {
         $empresa_id = $_GET['empresa_id'] ?? 0;
         

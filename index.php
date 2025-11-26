@@ -3088,6 +3088,7 @@
                         html += `<td>
                             <button class="btn btn-secondary" onclick="editarUsuario(${usr.id})">Editar</button>
                             <button class="btn btn-danger" onclick="toggleUsuario(${usr.id}, ${usr.ativo})">${usr.ativo == 1 ? 'Desativar' : 'Ativar'}</button>
+                            <button class="btn btn-danger" onclick="excluirUsuario(${usr.id}, '${usr.nome.replace(/'/g, "\\'")}')">Excluir</button>
                         </td>`;
                     }
                     
@@ -3259,7 +3260,32 @@
                 exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
-        
+
+        async function excluirUsuario(id, nome) {
+            // Verificar se é administrador
+            const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
+            if (usuarioLogado.perfil_id != 1) {
+                exibirNotificacaoSistema('Acesso negado! Apenas administradores podem excluir usuários.', 'error');
+                return;
+            }
+
+            // Impedir que o administrador se exclua a si mesmo
+            if (id == usuarioLogado.id) {
+                exibirNotificacaoSistema('Você não pode excluir sua própria conta.', 'error');
+                return;
+            }
+
+            if (confirm(`Tem certeza que deseja excluir permanentemente o usuário "${nome}"?\n\nEsta ação não pode ser desfeita.`)) {
+                const resultado = await chamarAPI('usuarios', 'excluir', {id: id});
+                if (resultado.sucesso) {
+                    exibirNotificacaoSistema(`Usuário "${nome}" excluído com sucesso!`, 'success');
+                    carregarUsuarios();
+                } else {
+                    exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+                }
+            }
+        }
+
         // Mostrar/ocultar campo de empresas baseado no perfil
         document.addEventListener('DOMContentLoaded', function() {
             const perfilSelect = document.getElementById('usr-perfil');
