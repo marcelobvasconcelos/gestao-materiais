@@ -417,5 +417,7 @@ if ($tipo === 'auth') {
 $conn->close();
 
 // Se nenhuma ação foi reconhecida
-echo json_encode(['sucesso' => false, 'erro' => 'Ação não encontrada']);
+echo json_encode(['sucesso' => false, 'erro' => 'Ação não encontrada', 'debug' => ['tipo' => $tipo, 'acao' => $acao, 'get_params' => $_GET]]);
+exit;
 ?>
+```

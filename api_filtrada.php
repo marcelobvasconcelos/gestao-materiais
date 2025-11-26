@@ -712,8 +712,19 @@ if ($tipo === 'empresas') {
     }
     
     if ($acao === 'excluir') {
-        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem excluir empresas']);
+        // Debug: Log da sessão
+        error_log("DEBUG Excluir Empresa - Sessão completa: " . json_encode($_SESSION));
+        error_log("DEBUG - usuario_perfil: " . ($_SESSION['usuario_perfil'] ?? 'não definido'));
+        error_log("DEBUG - perfil_id: " . ($_SESSION['perfil_id'] ?? 'não definido'));
+        
+        // Verificar ambas as possibilidades de nome da variável de sessão
+        $perfil = $_SESSION['usuario_perfil'] ?? $_SESSION['perfil_id'] ?? null;
+        
+        if (!$perfil || $perfil != 1) {
+            $msg_erro = 'Apenas administradores podem excluir empresas';
+            $msg_erro .= ' (Perfil detectado: ' . ($perfil ?? 'nenhum') . ')';
+            error_log("DEBUG - NEGADO: " . $msg_erro);
+            echo json_encode(['sucesso' => false, 'erro' => $msg_erro]);
             exit;
         }
         
@@ -723,14 +734,25 @@ if ($tipo === 'empresas') {
             exit;
         }
         
-        // Verificar se há materiais associados
-        $stmt = $conn->prepare('SELECT COUNT(*) as total FROM materiais WHERE empresa_id = ? AND ativo = 1');
+        // Verificar se há materiais associados (ATIVOS OU INATIVOS)
+        $stmt = $conn->prepare('SELECT id, nome, codigo_sku, ativo FROM materiais WHERE empresa_id = ?');
         $stmt->bind_param('i', $empresa_id);
         $stmt->execute();
-        $result = $stmt->get_result()->fetch_assoc();
+        $result = $stmt->get_result();
+        $materiais = $result->fetch_all(MYSQLI_ASSOC);
         
-        if ($result['total'] > 0) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Não é possível excluir empresa com materiais associados']);
+        if (count($materiais) > 0) {
+            $msg_erro = 'Não é possível excluir empresa. Existem ' . count($materiais) . ' material(is) vinculado(s):\n\n';
+            
+            foreach ($materiais as $mat) {
+                $status = $mat['ativo'] == 1 ? 'ATIVO' : 'INATIVO (excluído logicamente)';
+                $msg_erro .= "- {$mat['nome']} ({$mat['codigo_sku']}) - Status: {$status}\n";
+            }
+            
+            $msg_erro .= "\n⚠️ IMPORTANTE: Materiais 'excluídos' ainda existem no banco (apenas marcados como inativos).\n";
+            $msg_erro .= "Para excluir a empresa, você precisa DELETAR permanentemente esses materiais do banco de dados.";
+            
+            echo json_encode(['sucesso' => false, 'erro' => $msg_erro]);
             exit;
         }
         
@@ -744,9 +766,12 @@ if ($tipo === 'empresas') {
         $stmt->bind_param('i', $empresa_id);
         
         if ($stmt->execute()) {
+            error_log("DEBUG - Empresa $empresa_id excluída com sucesso");
             echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa excluída com sucesso']);
         } else {
-            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir empresa']);
+            $erro_mysql = $stmt->error;
+            error_log("DEBUG - Erro MySQL ao excluir empresa: $erro_mysql");
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir empresa: ' . $erro_mysql]);
         }
         exit;
     }
@@ -763,13 +788,31 @@ if ($tipo === 'empresas') {
             exit;
         }
         
+        // Log dos dados recebidos
+        error_log("Atualizando empresa ID: $empresa_id");
+        error_log("Dados: " . json_encode($dados));
+        
         $stmt = $conn->prepare('UPDATE empresas_terceirizadas SET nome=?, tipo_servico=?, numero_contrato=?, cnpj=?, telefone=?, email=? WHERE id=?');
+        
+        if (!$stmt) {
+            $erro = $conn->error;
+            error_log("Erro ao preparar statement: $erro");
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao preparar atualização: ' . $erro]);
+            exit;
+        }
+        
         $stmt->bind_param('ssssssi', $dados['nome'], $dados['tipo_servico'], $dados['numero_contrato'], $dados['cnpj'], $dados['telefone'], $dados['email'], $empresa_id);
         
         if ($stmt->execute()) {
-            echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa atualizada com sucesso']);
+            if ($stmt->affected_rows > 0) {
+                echo json_encode(['sucesso' => true, 'mensagem' => 'Empresa atualizada com sucesso']);
+            } else {
+                echo json_encode(['sucesso' => false, 'erro' => 'Nenhuma alteração foi feita ou empresa não encontrada']);
+            }
         } else {
-            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar empresa']);
+            $erro = $stmt->error;
+            error_log("Erro ao executar UPDATE: $erro");
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar empresa: ' . $erro]);
         }
         exit;
     }
@@ -997,6 +1040,221 @@ if ($tipo === 'materiais') {
         }
         exit;
     }
+    
+    if ($acao === 'atualizar') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem editar materiais']);
+            exit;
+        }
+        
+        $material_id = $dados['id'] ?? 0;
+        if (!$material_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID do material não informado']);
+            exit;
+        }
+        
+        // Verificar se material existe
+        $stmt = $conn->prepare('SELECT empresa_id FROM materiais WHERE id = ? AND ativo = 1');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows === 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material não encontrado']);
+            exit;
+        }
+        
+        $material = $result->fetch_assoc();
+        
+        // Verificar permissão de empresa
+        if ($_SESSION['empresas_permitidas'] !== 'ALL' && !in_array($material['empresa_id'], $_SESSION['empresas_permitidas'])) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Sem permissão para editar material desta empresa']);
+            exit;
+        }
+        
+        $stmt = $conn->prepare('UPDATE materiais SET nome=?, categoria_id=?, empresa_id=?, local_id=?, ponto_reposicao=?, estoque_maximo=? WHERE id=?');
+        $stmt->bind_param('siiiddi', 
+            $dados['nome'],
+            $dados['categoria_id'],
+            $dados['empresa_id'],
+            $dados['local_id'],
+            $dados['ponto_reposicao'] ?? 0,
+            $dados['estoque_maximo'] ?? 0,
+            $material_id
+        );
+        
+        if ($stmt->execute()) {
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Material atualizado com sucesso']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar material: ' . $stmt->error]);
+        }
+        exit;
+    }
+    
+    if ($acao === 'excluir') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem excluir materiais']);
+            exit;
+        }
+
+        $material_id = $dados['id'] ?? 0;
+        if (!$material_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID do material não informado']);
+            exit;
+        }
+
+        // Verificar se material existe e obter informações
+        $stmt = $conn->prepare('SELECT nome, estoque_atual, empresa_id FROM materiais WHERE id = ? AND ativo = 1');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($result->num_rows === 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material não encontrado']);
+            exit;
+        }
+
+        $material = $result->fetch_assoc();
+
+        // Verificar permissão de empresa
+        if ($_SESSION['empresas_permitidas'] !== 'ALL' && !in_array($material['empresa_id'], $_SESSION['empresas_permitidas'])) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Sem permissão para excluir material desta empresa']);
+            exit;
+        }
+
+        // VALIDAÇÃO: Não permitir excluir material com estoque
+        if ($material['estoque_atual'] > 0) {
+            echo json_encode([
+                'sucesso' => false,
+                'erro' => 'Não é possível excluir material com estoque. Estoque atual: ' . $material['estoque_atual']
+            ]);
+            exit;
+        }
+
+        // Verificar se há movimentações de entrada - estas precisam ser excluídas primeiro devido à chave estrangeira
+        $stmt = $conn->prepare('SELECT COUNT(*) as total FROM movimentacoes_entrada WHERE material_id = ?');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result_entrada = $stmt->get_result()->fetch_assoc();
+
+        $stmt = $conn->prepare('SELECT COUNT(*) as total FROM movimentacoes_saida WHERE material_id = ?');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result_saida = $stmt->get_result()->fetch_assoc();
+
+        $total_movimentacoes_entrada = (int)$result_entrada['total'];
+        $total_movimentacoes_saida = (int)$result_saida['total'];
+        $total_movimentacoes = $total_movimentacoes_entrada + $total_movimentacoes_saida;
+
+        // Transação para garantir consistência
+        $conn->begin_transaction();
+        try {
+            // Excluir primeiro as movimentações de entrada relacionadas (devido à chave estrangeira)
+            if ($total_movimentacoes_entrada > 0) {
+                $stmt = $conn->prepare('DELETE FROM movimentacoes_entrada WHERE material_id = ?');
+                $stmt->bind_param('i', $material_id);
+                $stmt->execute();
+                error_log("Excluídas $total_movimentacoes_entrada movimentações de entrada para o material ID $material_id");
+            }
+
+            // Excluir movimentações de saída relacionadas
+            if ($total_movimentacoes_saida > 0) {
+                $stmt = $conn->prepare('DELETE FROM movimentacoes_saida WHERE material_id = ?');
+                $stmt->bind_param('i', $material_id);
+                $stmt->execute();
+                error_log("Excluídas $total_movimentacoes_saida movimentações de saída para o material ID $material_id");
+            }
+
+            // Agora excluir o material
+            $stmt = $conn->prepare('DELETE FROM materiais WHERE id = ?');
+            $stmt->bind_param('i', $material_id);
+
+            if ($stmt->execute()) {
+                $conn->commit();
+                error_log("HARD DELETE - Material ID $material_id ({$material['nome']}) deletado permanentemente com $total_movimentacoes movimentações relacionadas");
+                echo json_encode(['sucesso' => true, 'mensagem' => "Material excluído permanentemente do banco de dados e $total_movimentacoes movimentações associadas removidas"]);
+            } else {
+                $conn->rollback();
+                echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir material: ' . $stmt->error]);
+            }
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro na transação: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+    
+    if ($acao === 'hard_delete') {
+        // HARD DELETE: Exclusão permanente do banco de dados (apenas para materiais inativos)
+        if (!isset($_SESSION['usuario_perfil']) || $_SESSION['usuario_perfil'] != 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores podem deletar permanentemente materiais']);
+            exit;
+        }
+        
+        $material_id = $dados['id'] ?? 0;
+        if (!$material_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID do material não informado']);
+            exit;
+        }
+        
+        // Verificar se material existe e se está INATIVO
+        $stmt = $conn->prepare('SELECT nome, ativo, estoque_atual, empresa_id FROM materiais WHERE id = ?');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows === 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material não encontrado']);
+            exit;
+        }
+        
+        $material = $result->fetch_assoc();
+        
+        // Verificar se está INATIVO (segurança: só permite deletar permanentemente materiais já "excluídos")
+        if ($material['ativo'] == 1) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas materiais inativos podem ser deletados permanentemente. Faça uma exclusão normal primeiro.']);
+            exit;
+        }
+        
+        // Verificar se tem estoque
+        if ($material['estoque_atual'] > 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material possui estoque (' . $material['estoque_atual'] . '). Não é possível deletar.']);
+            exit;
+        }
+        
+        // Verificar se há movimentações (entrada ou saída)
+        $stmt = $conn->prepare('SELECT COUNT(*) as total FROM movimentacoes_entrada WHERE material_id = ?');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result_entrada = $stmt->get_result()->fetch_assoc();
+        
+        $stmt = $conn->prepare('SELECT COUNT(*) as total FROM movimentacoes_saida WHERE material_id = ?');
+        $stmt->bind_param('i', $material_id);
+        $stmt->execute();
+        $result_saida = $stmt->get_result()->fetch_assoc();
+        
+        $total_movimentacoes = $result_entrada['total'] + $result_saida['total'];
+        
+        if ($total_movimentacoes > 0) {
+            echo json_encode([
+                'sucesso' => false, 
+                'erro' => 'Material possui histórico de movimentações (' . $total_movimentacoes . ' registros). Por segurança, não é possível deletar permanentemente materiais com histórico.'
+            ]);
+            exit;
+        }
+        
+        // DELETE permanente do banco de dados
+        $stmt = $conn->prepare('DELETE FROM materiais WHERE id = ?');
+        $stmt->bind_param('i', $material_id);
+        
+        if ($stmt->execute()) {
+            error_log("HARD DELETE - Material ID $material_id ({$material['nome']}) deletado permanentemente por admin");
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Material "' . $material['nome'] . '" deletado permanentemente do banco de dados']);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao deletar material: ' . $stmt->error]);
+        }
+        exit;
+    }
 }
 
 // ATUALIZAR PRÓPRIO PERFIL (qualquer usuário logado pode fazer)
@@ -1164,69 +1422,6 @@ if ($tipo === 'usuarios') {
         } else {
             echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar']);
         }
-        exit;
-    }
-    
-    // Atualizar próprio perfil (qualquer usuário logado)
-    if ($acao === 'atualizar_perfil') {
-        // Verificar se está logado
-        if (!isset($_SESSION['usuario_id'])) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Usuário não autenticado']);
-            exit;
-        }
-        
-        // Verificar se está tentando atualizar seu próprio perfil
-        if ($_SESSION['usuario_id'] != $dados['id']) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Você só pode atualizar seu próprio perfil']);
-            exit;
-        }
-        
-        // Buscar usuário atual
-        $stmt = $conn->prepare('SELECT senha, email FROM usuarios WHERE id = ?');
-        $stmt->bind_param('i', $dados['id']);
-        $stmt->execute();
-        $usuario_atual = $stmt->get_result()->fetch_assoc();
-        
-        if (!$usuario_atual) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Usuário não encontrado']);
-            exit;
-        }
-        
-        // Verificar senha atual
-        if (!password_verify($dados['senha_atual'], $usuario_atual['senha'])) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Senha atual incorreta']);
-            exit;
-        }
-        
-        // Verificar se email já está em uso por outro usuário
-        if ($dados['email'] != $usuario_atual['email']) {
-            $stmt = $conn->prepare('SELECT id FROM usuarios WHERE email = ? AND id != ?');
-            $stmt->bind_param('si', $dados['email'], $dados['id']);
-            $stmt->execute();
-            if ($stmt->get_result()->num_rows > 0) {
-                echo json_encode(['sucesso' => false, 'erro' => 'Este email já está em uso']);
-                exit;
-            }
-        }
-        
-        // Atualizar dados
-        if ($dados['nova_senha']) {
-            // Atualizar com nova senha
-            $nova_senha_hash = password_hash($dados['nova_senha'], PASSWORD_DEFAULT);
-            $stmt = $conn->prepare('UPDATE usuarios SET nome = ?, email = ?, senha = ? WHERE id = ?');
-            $stmt->bind_param('sssi', $dados['nome'], $dados['email'], $nova_senha_hash, $dados['id']);
-        } else {
-            // Atualizar sem mudar senha
-            $stmt = $conn->prepare('UPDATE usuarios SET nome = ?, email = ? WHERE id = ?');
-            $stmt->bind_param('ssi', $dados['nome'], $dados['email'], $dados['id']);
-        }
-        
-        if ($stmt->execute()) {
-            echo json_encode(['sucesso' => true, 'mensagem' => 'Perfil atualizado com sucesso']);
-        } else {
-            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar perfil']);
-        }
-        exit;
     }
     
     if ($acao === 'por_empresa') {
@@ -1507,6 +1702,7 @@ if ($tipo === 'entrada') {
             $conn->rollback();
             echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar entrada: ' . $e->getMessage()]);
         }
+        exit;
     }
 }
 

@@ -21,52 +21,115 @@
         // Configuração inicial ou scripts essenciais
         // Configuração inicial ou scripts essenciais
 
-        // Função para mostrar alertas (Modal Popup)
-        function mostrarAlerta(msg, tipo = 'success') {
-            const modal = document.getElementById('modal-notificacao');
-            const iconeEl = document.getElementById('modal-notificacao-icone');
-            const tituloEl = document.getElementById('modal-notificacao-titulo');
-            const mensagemEl = document.getElementById('modal-notificacao-mensagem');
-            
-            // Configurar ícone e título baseado no tipo
+        // Função para mostrar alertas (Modal Popup Dinâmico)
+        function exibirNotificacaoSistema(msg, tipo = 'success') {
+            // Remover modal anterior se existir
+            const modalAnterior = document.getElementById('modal-alerta-sistema');
+            if (modalAnterior) {
+                modalAnterior.remove();
+            }
+
+            // Configurar ícone e cores
             let icone = '';
             let titulo = '';
-            let cor = '';
+            let corTitulo = '';
             
             if (tipo === 'success') {
                 icone = '✅';
                 titulo = 'Sucesso!';
-                cor = '#10b981';
+                corTitulo = '#10b981';
             } else if (tipo === 'error') {
                 icone = '❌';
                 titulo = 'Erro!';
-                cor = '#ef4444';
+                corTitulo = '#ef4444';
             } else if (tipo === 'warning') {
                 icone = '⚠️';
                 titulo = 'Atenção!';
-                cor = '#f59e0b';
+                corTitulo = '#f59e0b';
             }
+
+            // Criar elementos do modal
+            const modal = document.createElement('div');
+            modal.id = 'modal-alerta-sistema';
             
-            iconeEl.textContent = icone;
-            tituloEl.textContent = titulo;
-            tituloEl.style.color = cor;
-            mensagemEl.textContent = msg;
+            // Estilos forçados com !important para garantir sobreposição
+            console.log('🚀 NOVA VERSÃO DO MODAL CHAMADA! 🚀');
+            modal.style.cssText = `
+                display: flex !important;
+                position: fixed !important;
+                z-index: 2147483647 !important; /* Máximo z-index possível */
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                background-color: rgba(15, 23, 42, 0.85) !important; /* Fundo Azul Escuro */
+                justify-content: center !important;
+                align-items: center !important;
+                font-family: 'Inter', sans-serif !important;
+            `;
+
+            const conteudo = document.createElement('div');
+            conteudo.style.cssText = `
+                background-color: white !important;
+                padding: 40px !important;
+                border-radius: 16px !important;
+                max-width: 500px !important;
+                width: 90% !important;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+                text-align: center !important;
+                position: relative !important;
+                animation: fadeInScale 0.3s ease-out !important;
+            `;
+
+            // HTML interno
+            conteudo.innerHTML = `
+                <div style="font-size: 4rem; margin-bottom: 20px;">${icone}</div>
+                <h3 style="margin-bottom: 15px; font-size: 1.6rem; font-weight: 600; color: ${corTitulo};">${titulo}</h3>
+                <p style="color: #64748b; margin-bottom: 30px; font-size: 1.1rem; line-height: 1.6;">${msg}</p>
+                <button id="btn-fechar-modal" style="
+                    background-color: #0f172a; 
+                    color: white; 
+                    border: none; 
+                    padding: 12px 30px; 
+                    border-radius: 8px; 
+                    font-size: 1rem; 
+                    cursor: pointer; 
+                    transition: background 0.2s;
+                ">OK</button>
+                <style>
+                    @keyframes fadeInScale {
+                        from { opacity: 0; transform: scale(0.9); }
+                        to { opacity: 1; transform: scale(1); }
+                    }
+                    #btn-fechar-modal:hover { background-color: #1e293b !important; }
+                </style>
+            `;
+
+            modal.appendChild(conteudo);
+            document.body.appendChild(modal);
+
+            // Eventos de fechar
+            const btnFechar = modal.querySelector('#btn-fechar-modal');
+            btnFechar.onclick = fecharModalNotificacao;
             
-            // Mostrar modal
-            modal.style.display = 'flex';
+            modal.onclick = function(e) {
+                if (e.target === modal) fecharModalNotificacao();
+            };
+            
+            // Focar no botão
+            btnFechar.focus();
         }
         
         function fecharModalNotificacao() {
-            document.getElementById('modal-notificacao').style.display = 'none';
+            const modal = document.getElementById('modal-alerta-sistema');
+            if (modal) {
+                modal.style.opacity = '0';
+                modal.style.transition = 'opacity 0.2s';
+                setTimeout(() => modal.remove(), 200);
+            }
         }
         
-        // Fechar modal ao clicar fora
-        window.addEventListener('click', function(event) {
-            const modal = document.getElementById('modal-notificacao');
-            if (event.target === modal) {
-                fecharModalNotificacao();
-            }
-        });
+        // Remover listener antigo de window click pois agora é tratado no próprio elemento
     </script>
 </head>
 <body>
@@ -911,15 +974,7 @@
         </div>
     </div>
 
-    <!-- Modal de Notificação -->
-    <div id="modal-notificacao" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 400px; text-align: center;">
-            <div id="modal-notificacao-icone" style="font-size: 3rem; margin-bottom: 15px;"></div>
-            <h3 id="modal-notificacao-titulo" style="margin-bottom: 10px;"></h3>
-            <p id="modal-notificacao-mensagem" style="color: #64748b; margin-bottom: 20px;"></p>
-            <button class="btn btn-primary" onclick="fecharModalNotificacao()" style="min-width: 100px;">OK</button>
-        </div>
-    </div>
+    <!-- Modal removido para ser gerado dinamicamente pelo JS -->
 
     <script>
         // =====================================================================
@@ -1041,7 +1096,7 @@
             else if (secao === 'locais') setTimeout(carregarLocais, 100);
         }
 
-        function mostrarAlerta(msg, tipo) {
+        function exibirNotificacaoSistema(msg, tipo) {
             const html = `<div class="alert alert-${tipo}">${msg}</div>`;
             const container = document.createElement('div');
             container.innerHTML = html;
@@ -1082,7 +1137,7 @@
                 const resultado = await chamarAPI('dashboard', 'stats');
                 
                 if (!resultado.sucesso) {
-                    mostrarAlerta('Erro ao carregar dashboard: ' + (resultado.erro || 'Erro desconhecido'), 'error');
+                    exibirNotificacaoSistema('Erro ao carregar dashboard: ' + (resultado.erro || 'Erro desconhecido'), 'error');
                     return;
                 }
                 
@@ -1101,7 +1156,7 @@
                 
             } catch (error) {
                 console.error('Erro ao carregar dashboard:', error);
-                mostrarAlerta('Erro ao carregar dashboard', 'error');
+                exibirNotificacaoSistema('Erro ao carregar dashboard', 'error');
             }
         }
 
@@ -1393,6 +1448,7 @@
         }
 
         async function salvarEmpresa() {
+            console.log('=== INICIANDO SALVAR EMPRESA ===');
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
             const responsavelId = usuarioLogado ? usuarioLogado.id : 1;
 
@@ -1406,8 +1462,11 @@
                 responsavel_id: responsavelId
             };
 
+            console.log('Dados do formulário:', dados);
+            console.log('Empresa editando ID:', empresaEditando);
+
             if (!dados.nome || !dados.tipo_servico) {
-                mostrarAlerta('Preencha todos os campos obrigatórios', 'warning');
+                exibirNotificacaoSistema('Preencha todos os campos obrigatórios', 'warning');
                 return;
             }
 
@@ -1419,9 +1478,13 @@
                 mensagemSucesso = 'Empresa atualizada com sucesso!';
             }
 
+            console.log('Ação:', acao, 'Dados completos:', dados);
+
             const resultado = await chamarAPI('empresas', acao, dados);
+            console.log('Resultado da API:', resultado);
+            
             if (resultado.sucesso) {
-                mostrarAlerta(mensagemSucesso, 'success');
+                exibirNotificacaoSistema(mensagemSucesso, 'success');
                 // Limpar formulário
                 document.getElementById('emp-nome').value = '';
                 document.getElementById('emp-tipo').value = '';
@@ -1433,7 +1496,8 @@
                 empresaEditando = null;
                 carregarEmpresas();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                console.error('ERRO AO SALVAR EMPRESA:', resultado.erro);
+                exibirNotificacaoSistema('Erro ao salvar empresa: ' + (resultado.erro || 'Erro desconhecido'), 'error');
             }
         }
 
@@ -1444,10 +1508,10 @@
 
             const resultado = await chamarAPI('empresas', 'excluir', { id: id });
             if (resultado.sucesso) {
-                mostrarAlerta('Empresa excluída com sucesso!', 'success');
+                exibirNotificacaoSistema('Empresa excluída com sucesso!', 'success');
                 carregarEmpresas();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -1497,18 +1561,18 @@
             };
 
             if (!dados.nome) {
-                mostrarAlerta('Preencha o nome da categoria', 'warning');
+                exibirNotificacaoSistema('Preencha o nome da categoria', 'warning');
                 return;
             }
 
             const resultado = await chamarAPI('categorias', 'criar', dados);
             if (resultado.sucesso) {
-                mostrarAlerta('Categoria cadastrada com sucesso!', 'success');
+                exibirNotificacaoSistema('Categoria cadastrada com sucesso!', 'success');
                 document.getElementById('cat-nome').value = '';
                 document.getElementById('cat-descricao').value = '';
                 carregarCategorias();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -1574,12 +1638,12 @@
             };
 
             if (!dados.nome) {
-                mostrarAlerta('Preencha o nome do local', 'warning');
+                exibirNotificacaoSistema('Preencha o nome do local', 'warning');
                 return;
             }
 
             if (dados.empresas.length === 0) {
-                mostrarAlerta('Selecione pelo menos uma empresa vinculada', 'warning');
+                exibirNotificacaoSistema('Selecione pelo menos uma empresa vinculada', 'warning');
                 return;
             }
 
@@ -1591,11 +1655,11 @@
 
             const resultado = await chamarAPI('locais', acao, dados);
             if (resultado.sucesso) {
-                mostrarAlerta(id ? 'Local atualizado com sucesso!' : 'Local cadastrado com sucesso!', 'success');
+                exibirNotificacaoSistema(id ? 'Local atualizado com sucesso!' : 'Local cadastrado com sucesso!', 'success');
                 limparFormLocal();
                 carregarLocais();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -1634,10 +1698,10 @@
 
             const resultado = await chamarAPI('locais', 'excluir', { id: id });
             if (resultado.sucesso) {
-                mostrarAlerta('Local excluído com sucesso!', 'success');
+                exibirNotificacaoSistema('Local excluído com sucesso!', 'success');
                 carregarLocais();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -1654,12 +1718,12 @@
             const empresa = document.getElementById('mat-empresa').value;
             
             if (!categoria) {
-                mostrarAlerta('Selecione uma categoria primeiro', 'warning');
+                exibirNotificacaoSistema('Selecione uma categoria primeiro', 'warning');
                 return;
             }
             
             if (!empresa) {
-                mostrarAlerta('Selecione uma empresa primeiro', 'warning');
+                exibirNotificacaoSistema('Selecione uma empresa primeiro', 'warning');
                 return;
             }
             
@@ -1671,9 +1735,9 @@
             if (resultado.sucesso) {
                 document.getElementById('mat-sku').value = resultado.sku;
                 document.getElementById('mat-sku').readOnly = false;
-                mostrarAlerta('SKU gerado: ' + resultado.sku, 'success');
+                exibirNotificacaoSistema('SKU gerado: ' + resultado.sku, 'success');
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
         async function carregarComboBoxes() {
@@ -1809,9 +1873,19 @@
             
             if (resultado.sucesso) {
                 if (resultado.dados && resultado.dados.length > 0) {
-                    let html = '<table><thead><tr><th>Material</th><th>Código</th><th>Estoque</th><th>Empresa</th></tr></thead><tbody>';
+                    let html = '<table><thead><tr><th>Material</th><th>Código</th><th>Estoque</th><th>Empresa</th><th>Ações</th></tr></thead><tbody>';
                     resultado.dados.forEach(mat => {
-                        html += `<tr><td>${mat.nome || ''}</td><td>${mat.codigo_sku || ''}</td><td>${mat.estoque_atual || 0}</td><td>${mat.empresa_nome || ''}</td></tr>`;
+                        const nomeEscaped = (mat.nome || '').replace(/'/g, "\\'");
+                        html += `<tr>
+                            <td>${mat.nome || ''}</td>
+                            <td>${mat.codigo_sku || ''}</td>
+                            <td>${mat.estoque_atual || 0}</td>
+                            <td>${mat.empresa_nome || ''}</td>
+                            <td>
+                                <button class="btn btn-secondary btn-sm" onclick="editarMaterialGeral(${mat.id})" style="margin-right: 5px; padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
+                                <button class="btn btn-danger btn-sm" onclick="excluirMaterialGeral(${mat.id}, '${nomeEscaped}', ${mat.estoque_atual || 0})" style="padding: 5px 10px; font-size: 12px;">🗑️ Excluir</button>
+                            </td>
+                        </tr>`;
                     });
                     html += '</tbody></table>';
                     document.getElementById('lista-materiais').innerHTML = html;
@@ -1830,22 +1904,22 @@
             const sku = document.getElementById('mat-sku').value;
             
             if (!nome) {
-                mostrarAlerta('Preencha o nome do material', 'warning');
+                exibirNotificacaoSistema('Preencha o nome do material', 'warning');
                 return;
             }
             
             if (!categoria) {
-                mostrarAlerta('Selecione uma categoria', 'warning');
+                exibirNotificacaoSistema('Selecione uma categoria', 'warning');
                 return;
             }
             
             if (!empresa) {
-                mostrarAlerta('Selecione uma empresa', 'warning');
+                exibirNotificacaoSistema('Selecione uma empresa', 'warning');
                 return;
             }
             
             if (!sku) {
-                mostrarAlerta('Gere o código SKU antes de salvar', 'warning');
+                exibirNotificacaoSistema('Gere o código SKU antes de salvar', 'warning');
                 return;
             }
             
@@ -1864,7 +1938,7 @@
 
             const resultado = await chamarAPI('materiais', 'criar', dados);
             if (resultado.sucesso) {
-                mostrarAlerta('Material cadastrado com sucesso!', 'success');
+                exibirNotificacaoSistema('Material cadastrado com sucesso!', 'success');
                 document.getElementById('mat-nome').value = '';
                 document.getElementById('mat-sku').value = '';
                 document.getElementById('mat-sku').readOnly = true;
@@ -1875,7 +1949,37 @@
                 document.getElementById('mat-maximo').value = '';
                 carregarMateriais();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+            }
+        }
+
+        async function editarMaterialGeral(id) {
+            exibirNotificacaoSistema('Função de edição em desenvolvimento. Material ID: ' + id, 'warning');
+            // TODO: Implementar modal de edição de material
+        }
+
+        async function excluirMaterialGeral(id, nome, estoque) {
+            if (estoque > 0) {
+                if (!confirm(`O material "${nome}" possui estoque atual de ${estoque} unidades.\n\nNÃO É POSSÍVEL EXCLUIR materiais com estoque.\n\nVocê precisa zerar o estoque antes de excluir.`)) {
+                    return;
+                }
+                exibirNotificacaoSistema('Não é possível excluir material com estoque. Estoque atual: ' + estoque, 'error');
+                return;
+            }
+            
+            if (!confirm(`Tem certeza que deseja excluir o material "${nome}"?\n\nEsta ação não pode ser desfeita.`)) {
+                return;
+            }
+
+            console.log('Excluindo material ID:', id);
+            const resultado = await chamarAPI('materiais', 'excluir', { id: id });
+            console.log('Resultado:', resultado);
+            
+            if (resultado.sucesso) {
+                exibirNotificacaoSistema(resultado.mensagem || 'Material excluído com sucesso!', 'success');
+                filtrarMateriais(); // Recarregar lista
+            } else {
+                exibirNotificacaoSistema(resultado.erro || 'Erro ao excluir material', 'error');
             }
         }
 
@@ -2136,19 +2240,19 @@
             };
 
             if (!dados.material_id || !dados.quantidade) {
-                mostrarAlerta('Selecione material e quantidade', 'warning');
+                exibirNotificacaoSistema('Selecione material e quantidade', 'warning');
                 return;
             }
 
             const resultado = await chamarAPI('entrada', 'criar', dados);
             if (resultado.sucesso) {
-                mostrarAlerta('Entrada registrada com sucesso!', 'success');
+                exibirNotificacaoSistema('Entrada registrada com sucesso!', 'success');
                 document.getElementById('ent-quantidade').value = '';
                 document.getElementById('ent-nf').value = '';
                 document.getElementById('ent-obs').value = '';
                 carregarEntradas();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -2309,7 +2413,7 @@
             
             // Alertar se estoque baixo
             if (estoque <= 0) {
-                mostrarAlerta('Atenção: Este material está sem estoque!', 'warning');
+                exibirNotificacaoSistema('Atenção: Este material está sem estoque!', 'warning');
             }
         }
 
@@ -2324,25 +2428,25 @@
             };
 
             if (!dados.material_id || !dados.quantidade || !dados.observacao) {
-                mostrarAlerta('Preencha todos os campos obrigatórios (Material, Quantidade e Finalidade)', 'warning');
+                exibirNotificacaoSistema('Preencha todos os campos obrigatórios (Material, Quantidade e Finalidade)', 'warning');
                 return;
             }
             
             if (!dados.empresa_solicitante_id) {
-                mostrarAlerta('Selecione a empresa', 'warning');
+                exibirNotificacaoSistema('Selecione a empresa', 'warning');
                 return;
             }
 
             const resultado = await chamarAPI('saida', 'criar', dados);
             if (resultado.sucesso) {
-                mostrarAlerta('Saída registrada com sucesso!', 'success');
+                exibirNotificacaoSistema('Saída registrada com sucesso!', 'success');
                 document.getElementById('sai-quantidade').value = '';
                 document.getElementById('sai-obs').value = '';
                 // Limpar seleção de material mas manter empresa
                 document.getElementById('sai-material').value = '';
                 carregarSaidas();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -3012,7 +3116,7 @@
             // Verificar se é administrador
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
             if (usuarioLogado.perfil_id != 1) {
-                mostrarAlerta('Acesso negado! Apenas administradores podem cadastrar usuários.', 'error');
+                exibirNotificacaoSistema('Acesso negado! Apenas administradores podem cadastrar usuários.', 'error');
                 return;
             }
             
@@ -3021,7 +3125,7 @@
             const perfilId = parseInt(document.getElementById('usr-perfil').value);
             
             if (senha !== confirmaSenha) {
-                mostrarAlerta('As senhas não coincidem!', 'error');
+                exibirNotificacaoSistema('As senhas não coincidem!', 'error');
                 return;
             }
 
@@ -3032,7 +3136,7 @@
                 empresasVinculadas = Array.from(checkboxes).map(cb => parseInt(cb.value));
                 
                 if (empresasVinculadas.length === 0) {
-                    mostrarAlerta('Selecione pelo menos uma empresa para este perfil', 'warning');
+                    exibirNotificacaoSistema('Selecione pelo menos uma empresa para este perfil', 'warning');
                     return;
                 }
             }
@@ -3047,13 +3151,13 @@
             };
 
             if (!dados.nome || !dados.email || !dados.senha || !dados.perfil_id) {
-                mostrarAlerta('Preencha todos os campos obrigatórios', 'warning');
+                exibirNotificacaoSistema('Preencha todos os campos obrigatórios', 'warning');
                 return;
             }
 
             const resultado = await chamarAPI('usuarios', 'criar', dados);
             if (resultado.sucesso) {
-                mostrarAlerta('Usuário cadastrado com sucesso!', 'success');
+                exibirNotificacaoSistema('Usuário cadastrado com sucesso!', 'success');
                 document.getElementById('usr-nome').value = '';
                 document.getElementById('usr-email').value = '';
                 document.getElementById('usr-senha').value = '';
@@ -3065,7 +3169,7 @@
                 document.getElementById('usr-perfil').value = '';
                 carregarUsuarios();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
 
@@ -3073,7 +3177,7 @@
             // Verificar se é administrador
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
             if (usuarioLogado.perfil_id != 1) {
-                mostrarAlerta('Acesso negado! Apenas administradores podem alterar status de usuários.', 'error');
+                exibirNotificacaoSistema('Acesso negado! Apenas administradores podem alterar status de usuários.', 'error');
                 return;
             }
             
@@ -3083,10 +3187,10 @@
             if (confirm(`Deseja ${acao} este usuário?`)) {
                 const resultado = await chamarAPI('usuarios', 'toggle_status', {id: id, ativo: novoStatus});
                 if (resultado.sucesso) {
-                                       mostrarAlerta(`Usuário ${acao}do com sucesso!`, 'success');
+                                       exibirNotificacaoSistema(`Usuário ${acao}do com sucesso!`, 'success');
                     carregarUsuarios();
                 } else {
-                    mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                    exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
                 }
             }
         }
@@ -3095,7 +3199,7 @@
             // Verificar se é administrador
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
             if (usuarioLogado.perfil_id != 1) {
-                mostrarAlerta('Acesso negado! Apenas administradores podem editar usuários.', 'error');
+                exibirNotificacaoSistema('Acesso negado! Apenas administradores podem editar usuários.', 'error');
                 return;
             }
             
@@ -3131,7 +3235,7 @@
             // Verificar se é administrador
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
             if (usuarioLogado.perfil_id != 1) {
-                mostrarAlerta('Acesso negado! Apenas administradores podem editar usuários.', 'error');
+                exibirNotificacaoSistema('Acesso negado! Apenas administradores podem editar usuários.', 'error');
                 return;
             }
             
@@ -3144,7 +3248,7 @@
                 empresasVinculadas = Array.from(checkboxes).map(cb => parseInt(cb.value));
                 
                 if (empresasVinculadas.length === 0) {
-                    mostrarAlerta('Selecione pelo menos uma empresa para este perfil', 'warning');
+                    exibirNotificacaoSistema('Selecione pelo menos uma empresa para este perfil', 'warning');
                     return;
                 }
             }
@@ -3160,11 +3264,11 @@
             
             const resultado = await chamarAPI('usuarios', 'atualizar', dados);
             if (resultado.sucesso) {
-                mostrarAlerta('Usuário atualizado com sucesso!', 'success');
+                exibirNotificacaoSistema('Usuário atualizado com sucesso!', 'success');
                 fecharModalEdicao();
                 carregarUsuarios();
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
         
@@ -3351,7 +3455,7 @@
             console.log('=== INICIANDO SALVAR PERFIL ===');
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
             if (!usuarioLogado) {
-                mostrarAlerta('Erro: usuário não identificado', 'error');
+                exibirNotificacaoSistema('Erro: usuário não identificado', 'error');
                 return;
             }
             
@@ -3367,24 +3471,24 @@
             
             // Validações
             if (!nome || !email) {
-                mostrarAlerta('Nome e email são obrigatórios', 'warning');
+                exibirNotificacaoSistema('Nome e email são obrigatórios', 'warning');
                 return;
             }
             
             if (!senhaAtual) {
-                mostrarAlerta('Digite sua senha atual para confirmar as alterações', 'warning');
+                exibirNotificacaoSistema('Digite sua senha atual para confirmar as alterações', 'warning');
                 return;
             }
             
             // Se está tentando mudar a senha
             if (novaSenha || confirmaSenha) {
                 if (novaSenha !== confirmaSenha) {
-                    mostrarAlerta('As senhas não coincidem', 'warning');
+                    exibirNotificacaoSistema('As senhas não coincidem', 'warning');
                     return;
                 }
                 
                 if (novaSenha.length < 6) {
-                    mostrarAlerta('A nova senha deve ter pelo menos 6 caracteres', 'warning');
+                    exibirNotificacaoSistema('A nova senha deve ter pelo menos 6 caracteres', 'warning');
                     return;
                 }
             }
@@ -3403,7 +3507,7 @@
             
             console.log('Resultado da API:', resultado);
             if (resultado.sucesso) {
-                mostrarAlerta('Perfil atualizado com sucesso!', 'success');
+                exibirNotificacaoSistema('Perfil atualizado com sucesso!', 'success');
                 
                 // Atualizar dados no localStorage
                 usuarioLogado.nome = nome;
@@ -3421,12 +3525,12 @@
                 // Se mudou a senha, fazer logout após 2 segundos
                 if (novaSenha) {
                     setTimeout(() => {
-                        mostrarAlerta('Senha alterada! Faça login novamente.', 'success');
+                        exibirNotificacaoSistema('Senha alterada! Faça login novamente.', 'success');
                         setTimeout(() => logout(), 1500);
                     }, 2000);
                 }
             } else {
-                mostrarAlerta('Erro: ' + resultado.erro, 'error');
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
         

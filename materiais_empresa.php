@@ -36,7 +36,7 @@ if ($empresa_id === 0) {
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background: white;
             border-radius: 12px;
@@ -86,6 +86,20 @@ if ($empresa_id === 0) {
             background: rgba(255,255,255,0.3);
         }
 
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+
+        .btn-danger {
+            background: #c62828;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b71c1c;
+        }
+
         .content {
             padding: 30px;
         }
@@ -102,16 +116,16 @@ if ($empresa_id === 0) {
             border-left: 4px solid #1976d2;
         }
 
-        .alert-warning {
-            background: #fff3e0;
-            color: #f57c00;
-            border-left: 4px solid #f57c00;
-        }
-
         .alert-error {
             background: #ffebee;
             color: #c62828;
             border-left: 4px solid #c62828;
+        }
+
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
         }
 
         table {
@@ -185,6 +199,7 @@ if ($empresa_id === 0) {
         </div>
 
         <div class="content">
+            <div id="alerta"></div>
             <div id="lista-materiais">
                 <div class="loading">
                     <div class="spinner"></div>
@@ -197,6 +212,17 @@ if ($empresa_id === 0) {
     <script>
         const API_URL = './api_filtrada.php';
         const empresaId = <?php echo $empresa_id; ?>;
+
+        function mostrarAlerta(mensagem, tipo = 'success') {
+            const alerta = document.getElementById('alerta');
+            alerta.className = `alert alert-${tipo}`;
+            alerta.innerHTML = `<strong>${tipo === 'error' ? 'Erro:' : tipo === 'success' ? 'Sucesso:' : 'Atenção:'}</strong> ${mensagem}`;
+            alerta.style.display = 'block';
+            
+            setTimeout(() => {
+                alerta.style.display = 'none';
+            }, 5000);
+        }
 
         async function chamarAPI(tipo, acao, dados = null, parametrosExtras = '') {
             try {
@@ -215,6 +241,7 @@ if ($empresa_id === 0) {
                     return JSON.parse(texto);
                 } catch (jsonError) {
                     console.error('Erro ao parsear JSON:', jsonError);
+                    console.error('Resposta:', texto);
                     return { sucesso: false, erro: 'Resposta inválida do servidor' };
                 }
                 
@@ -244,6 +271,7 @@ if ($empresa_id === 0) {
                                     <th>Local</th>
                                     <th>Categoria</th>
                                     <th>Ponto Reposição</th>
+                                    <th>Ações</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -251,6 +279,7 @@ if ($empresa_id === 0) {
                     
                     resultado.dados.forEach(mat => {
                         const estoqueClass = mat.estoque_atual < mat.ponto_reposicao ? 'color: #c62828; font-weight: bold;' : 'color: #667eea; font-weight: bold;';
+                        const nomeEscaped = (mat.nome || '').replace(/'/g, "\\'");
                         html += `
                             <tr>
                                 <td><strong>${mat.nome}</strong></td>
@@ -259,6 +288,10 @@ if ($empresa_id === 0) {
                                 <td>${mat.local_nome || '-'}</td>
                                 <td>${mat.categoria_nome || '-'}</td>
                                 <td>${mat.ponto_reposicao || '-'}</td>
+                                <td>
+                                    <button class="btn btn-secondary btn-sm" onclick="editarMaterial(${mat.id})" style="margin-right: 5px;">✏️ Editar</button>
+                                    <button class="btn btn-danger btn-sm" onclick="excluirMaterial(${mat.id}, '${nomeEscaped}', ${mat.estoque_atual})">🗑️ Excluir</button>
+                                </td>
                             </tr>
                         `;
                     });
@@ -282,6 +315,34 @@ if ($empresa_id === 0) {
                         <strong>Erro:</strong> ${resultado.erro || 'Não foi possível carregar os materiais'}
                     </div>
                 `;
+            }
+        }
+
+        async function editarMaterial(id) {
+            alert('Função de edição em desenvolvimento. Material ID: ' + id);
+            // TODO: Implementar modal de edição
+        }
+
+        async function excluirMaterial(id, nome, estoque) {
+            if (estoque > 0) {
+                if (!confirm(`O material "${nome}" possui estoque atual de ${estoque} unidades.\n\nTem certeza que deseja excluir?`)) {
+                    return;
+                }
+            } else {
+                if (!confirm(`Tem certeza que deseja excluir o material "${nome}"?\n\nEsta ação não pode ser desfeita.`)) {
+                    return;
+                }
+            }
+
+            console.log('Excluindo material ID:', id);
+            const resultado = await chamarAPI('materiais', 'excluir', { id: id });
+            console.log('Resultado:', resultado);
+            
+            if (resultado.sucesso) {
+                mostrarAlerta(resultado.mensagem || 'Material excluído com sucesso!', 'success');
+                carregarMateriais();
+            } else {
+                mostrarAlerta(resultado.erro || 'Erro ao excluir material', 'error');
             }
         }
 
