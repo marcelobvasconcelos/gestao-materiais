@@ -532,17 +532,19 @@
                                 <div id="sai-material-lista" class="material-autocomplete"></div>
                             </div>
                         </div>
+                    </div>
+                    <div class="form-row">
                         <div class="form-group">
-                            <label>Local de Origem *</label>
-                            <select id="sai-local-origem">
-                                <option value="">Selecione o local de origem...</option>
-                            </select>
+                            <label>Quantidade Total *</label>
+                            <input type="number" id="sai-quantidade-total" placeholder="0" step="0.01">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Quantidade *</label>
-                            <input type="number" id="sai-quantidade" placeholder="0" step="0.01">
+                            <label>Locais Disponíveis para Saída</label>
+                            <div id="sai-locais-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 10px; background: #f8fafc;">
+                                <p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>
+                            </div>
                         </div>
                     </div>
                     <div class="form-group">
@@ -2325,56 +2327,11 @@
         }
         
         let materiaisSaida = [];
-        let locaisDisponiveis = [];
-
-        async function carregarLocaisSaida(empresaId) {
-            const selectLocal = document.getElementById('sai-local-origem');
-
-            if (!empresaId) {
-                selectLocal.innerHTML = '<option value="">Selecione o local de origem...</option>';
-                selectLocal.disabled = true;
-                return;
-            }
-
-            selectLocal.innerHTML = '<option value="">Carregando locais...</option>';
-            selectLocal.disabled = true;
-
-            try {
-                const resultado = await chamarAPI('locais', 'listar');
-
-                if (resultado.sucesso && resultado.dados) {
-                    locaisDisponiveis = resultado.dados;
-
-                    // Filtrar locais que pertencem à empresa ou são compartilhados
-                    let html = '<option value="">Selecione o local de origem...</option>';
-                    const locaisEmpresa = locaisDisponiveis.filter(local => {
-                        // Se o local tem empresas_ids e não for "ALL", verificar se empresa faz parte
-                        if (local.empresas_ids) {
-                            const ids = local.empresas_ids.split(',').map(id => parseInt(id.trim()));
-                            return ids.includes(parseInt(empresaId));
-                        }
-                        return true; // Se não tiver restrição, mostrar
-                    });
-
-                    locaisEmpresa.forEach(local => {
-                        html += `<option value="${local.id}">${local.nome}</option>`;
-                    });
-
-                    selectLocal.innerHTML = html;
-                    selectLocal.disabled = false;
-                } else {
-                    selectLocal.innerHTML = '<option value="">Nenhum local encontrado</option>';
-                    selectLocal.disabled = true;
-                }
-            } catch (error) {
-                selectLocal.innerHTML = '<option value="">Erro ao carregar locais</option>';
-                selectLocal.disabled = true;
-            }
-        }
 
         async function carregarMateriaisSaida(empresaId) {
             const inputBusca = document.getElementById('sai-material-busca');
             const inputHidden = document.getElementById('sai-material');
+            const locaisContainer = document.getElementById('sai-locais-container');
 
             if (!empresaId) {
                 inputBusca.placeholder = 'Selecione a empresa primeiro';
@@ -2382,9 +2339,10 @@
                 inputBusca.value = '';
                 inputHidden.value = '';
                 materiaisSaida = [];
-                // Limpar também o select de locais
-                document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o local de origem...</option>';
-                document.getElementById('sai-local-origem').disabled = true;
+                // Limpar também o container de locais
+                if (locaisContainer) {
+                    locaisContainer.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>';
+                }
                 return;
             }
 
@@ -2400,24 +2358,15 @@
                     inputBusca.disabled = false;
                     inputBusca.value = '';
                     inputHidden.value = '';
-
-                    // Carregar os locais após carregar os materiais
-                    await carregarLocaisSaida(empresaId);
                 } else {
                     materiaisSaida = [];
                     inputBusca.placeholder = 'Nenhum material encontrado';
                     inputBusca.disabled = true;
-                    // Limpar também o select de locais
-                    document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o local de origem...</option>';
-                    document.getElementById('sai-local-origem').disabled = true;
                 }
             } catch (error) {
                 materiaisSaida = [];
                 inputBusca.placeholder = 'Erro ao carregar materiais';
                 inputBusca.disabled = true;
-                // Limpar também o select de locais
-                document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o local de origem...</option>';
-                document.getElementById('sai-local-origem').disabled = true;
             }
         }
         
@@ -2454,55 +2403,157 @@
             lista.style.display = 'block';
         }
         
-        function selecionarMaterialSaida(id, nome, codigo, estoque) {
+        async function selecionarMaterialSaida(id, nome, codigo, estoque) {
             document.getElementById('sai-material-busca').value = `${nome} (${codigo})`;
             document.getElementById('sai-material').value = id;
             document.getElementById('sai-material-lista').style.display = 'none';
-            
+
+            // Carregar locais com estoque do material
+            await carregarLocaisComEstoque(id);
+
             // Alertar se estoque baixo
             if (estoque <= 0) {
                 exibirNotificacaoSistema('Atenção: Este material está sem estoque!', 'warning');
             }
         }
 
-        async function registrarSaida() {
-            // Obter local de origem, se existir
-            const localOrigemSelect = document.getElementById('sai-local-origem');
-            const localOrigemId = localOrigemSelect.value ? parseInt(localOrigemSelect.value) : null;
+        async function carregarLocaisComEstoque(materialId) {
+            const container = document.getElementById('sai-locais-container');
 
-            const dados = {
-                data_saida: document.getElementById('sai-data').value,
-                material_id: parseInt(document.getElementById('sai-material').value),
-                quantidade: parseFloat(document.getElementById('sai-quantidade').value),
-                empresa_solicitante_id: parseInt(document.getElementById('sai-empresa').value),
-                local_origem_id: localOrigemId, // Novo campo para local de origem
-                observacao: document.getElementById('sai-obs').value,
-                finalidade: document.getElementById('sai-obs').value // Usar observação como finalidade também
-            };
-
-            if (!dados.material_id || !dados.quantidade || !dados.observacao) {
-                exibirNotificacaoSistema('Preencha todos os campos obrigatórios (Material, Quantidade e Finalidade)', 'warning');
+            if (!materialId) {
+                container.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>';
                 return;
             }
 
-            if (!dados.empresa_solicitante_id) {
+            try {
+                // Carregar estoque por local para este material
+                const resultado = await chamarAPI('materiais', 'estoque_por_local', null, `&material_id=${materialId}`);
+
+                if (resultado.sucesso && resultado.dados && resultado.dados.length > 0) {
+                    let html = '<div style="max-height: 150px; overflow-y: auto;">';
+
+                    // Para cada local com estoque, criar um campo de quantidade
+                    resultado.dados.forEach(local => {
+                        if (local.estoque > 0) { // Mostrar apenas locais com estoque
+                            html += `
+                                <div class="local-estoque-item" style="display: flex; align-items: center; margin-bottom: 8px; padding: 8px; background: white; border-radius: 0.25rem; border: 1px solid #e2e8f0;">
+                                    <div style="flex: 1;">
+                                        <strong>${local.local_nome}</strong><br>
+                                        <small>Disponível: ${local.estoque}</small>
+                                    </div>
+                                    <div style="width: 100px; margin-left: 10px;">
+                                        <input type="number"
+                                               class="saida-local-qtd"
+                                               data-local-id="${local.local_id}"
+                                               data-estoque-max="${local.estoque}"
+                                               placeholder="Qtd"
+                                               min="0"
+                                               max="${local.estoque}"
+                                               step="0.01"
+                                               style="width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 0.25rem;">
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    html += '</div>';
+                    container.innerHTML = html;
+
+                    // Adicionar eventos para validar quantidades
+                    document.querySelectorAll('.saida-local-qtd').forEach(input => {
+                        input.addEventListener('input', function() {
+                            const max = parseFloat(this.getAttribute('data-estoque-max'));
+                            const valor = parseFloat(this.value) || 0;
+
+                            if (valor > max) {
+                                this.value = max;
+                                exibirNotificacaoSistema(`Quantidade excede o estoque disponível (${max})`, 'warning');
+                            } else if (valor < 0) {
+                                this.value = 0;
+                            }
+                        });
+                    });
+                } else {
+                    container.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Este material não está em nenhum local ou está com estoque 0</p>';
+                }
+            } catch (error) {
+                container.innerHTML = '<p style="color: #ef4444; text-align: center; padding: 20px;">Erro ao carregar locais com estoque</p>';
+                console.error('Erro ao carregar locais com estoque:', error);
+            }
+        }
+
+        async function registrarSaida() {
+            const materialId = parseInt(document.getElementById('sai-material').value);
+            const quantidadeTotal = parseFloat(document.getElementById('sai-quantidade-total').value);
+            const empresaSolicitanteId = parseInt(document.getElementById('sai-empresa').value);
+            const observacao = document.getElementById('sai-obs').value;
+
+            if (!materialId || !quantidadeTotal || !observacao) {
+                exibirNotificacaoSistema('Preencha todos os campos obrigatórios (Material, Quantidade Total e Finalidade)', 'warning');
+                return;
+            }
+
+            if (!empresaSolicitanteId) {
                 exibirNotificacaoSistema('Selecione a empresa', 'warning');
                 return;
             }
 
-            if (!localOrigemId) {
-                exibirNotificacaoSistema('Selecione o local de origem do material', 'warning');
+            // Obter todas as quantidades especificadas nos locais
+            const inputsQuantidade = document.querySelectorAll('.saida-local-qtd');
+            const saidasLocais = [];
+            let quantidadeTotalInformada = 0;
+
+            inputsQuantidade.forEach(input => {
+                const quantidade = parseFloat(input.value) || 0;
+                if (quantidade > 0) {
+                    const localId = parseInt(input.getAttribute('data-local-id'));
+                    const estoqueMax = parseFloat(input.getAttribute('data-estoque-max'));
+
+                    if (quantidade > estoqueMax) {
+                        exibirNotificacaoSistema(`Quantidade para o local excede o estoque disponível (${estoqueMax})`, 'error');
+                        return;
+                    }
+
+                    saidasLocais.push({
+                        local_id: localId,
+                        quantidade: quantidade
+                    });
+                    quantidadeTotalInformada += quantidade;
+                }
+            });
+
+            if (saidasLocais.length === 0) {
+                exibirNotificacaoSistema('Selecione pelo menos um local e quantidade para remover', 'warning');
                 return;
             }
 
-            const resultado = await chamarAPI('saida', 'criar', dados);
+            if (Math.abs(quantidadeTotalInformada - quantidadeTotal) > 0.01) { // Tolerância para floats
+                exibirNotificacaoSistema(`A soma das quantidades (${quantidadeTotalInformada}) deve ser igual à quantidade total informada (${quantidadeTotal})`, 'warning');
+                return;
+            }
+
+            // Preparar dados para envio
+            const dados = {
+                data_saida: document.getElementById('sai-data').value,
+                material_id: materialId,
+                quantidade_total: quantidadeTotal,
+                empresa_solicitante_id: empresaSolicitanteId,
+                saidas_por_local: saidasLocais, // Array com as saídas por local
+                observacao: observacao,
+                finalidade: observacao
+            };
+
+            const resultado = await chamarAPI('saida', 'criar_multipla', dados);
             if (resultado.sucesso) {
-                exibirNotificacaoSistema('Saída registrada com sucesso!', 'success');
-                document.getElementById('sai-quantidade').value = '';
+                exibirNotificacaoSistema('Saída registrada com sucesso em múltiplos locais!', 'success');
+                // Limpar formulário
+                document.getElementById('sai-quantidade-total').value = '';
                 document.getElementById('sai-obs').value = '';
-                // Limpar seleção de material e local de origem, mas manter empresa
                 document.getElementById('sai-material').value = '';
-                document.getElementById('sai-local-origem').value = '';
+                document.getElementById('sai-material-busca').value = '';
+                const container = document.getElementById('sai-locais-container');
+                container.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>';
                 carregarSaidas();
             } else {
                 exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
