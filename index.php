@@ -33,7 +33,7 @@
             let icone = '';
             let titulo = '';
             let corTitulo = '';
-            
+
             if (tipo === 'success') {
                 icone = '✅';
                 titulo = 'Sucesso!';
@@ -51,7 +51,7 @@
             // Criar elementos do modal
             const modal = document.createElement('div');
             modal.id = 'modal-alerta-sistema';
-            
+
             // Estilos forçados com !important para garantir sobreposição
             console.log('🚀 NOVA VERSÃO DO MODAL CHAMADA! 🚀');
             modal.style.cssText = `
@@ -87,13 +87,13 @@
                 <h3 style="margin-bottom: 15px; font-size: 1.6rem; font-weight: 600; color: ${corTitulo};">${titulo}</h3>
                 <p style="color: #64748b; margin-bottom: 30px; font-size: 1.1rem; line-height: 1.6;">${msg}</p>
                 <button id="btn-fechar-modal" style="
-                    background-color: #0f172a; 
-                    color: white; 
-                    border: none; 
-                    padding: 12px 30px; 
-                    border-radius: 8px; 
-                    font-size: 1rem; 
-                    cursor: pointer; 
+                    background-color: #0f172a;
+                    color: white;
+                    border: none;
+                    padding: 12px 30px;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    cursor: pointer;
                     transition: background 0.2s;
                 ">OK</button>
                 <style>
@@ -111,11 +111,11 @@
             // Eventos de fechar
             const btnFechar = modal.querySelector('#btn-fechar-modal');
             btnFechar.onclick = fecharModalNotificacao;
-            
+
             modal.onclick = function(e) {
                 if (e.target === modal) fecharModalNotificacao();
             };
-            
+
             // Focar no botão
             btnFechar.focus();
         }
@@ -1094,18 +1094,6 @@
             else if (secao === 'relatorios') setTimeout(carregarRelatorios, 100);
             else if (secao === 'usuarios') setTimeout(carregarUsuarios, 100);
             else if (secao === 'locais') setTimeout(carregarLocais, 100);
-        }
-
-        function exibirNotificacaoSistema(msg, tipo) {
-            const html = `<div class="alert alert-${tipo}">${msg}</div>`;
-            const container = document.createElement('div');
-            container.innerHTML = html;
-            document.body.insertBefore(container.firstChild, document.body.firstChild);
-            
-            const timeout = tipo === 'warning' ? 5000 : 3000;
-            setTimeout(() => {
-                document.querySelector('.alert')?.remove();
-            }, timeout);
         }
 
 
