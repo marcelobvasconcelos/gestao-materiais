@@ -1014,21 +1014,19 @@ if ($tipo === 'materiais') {
         // Preparar valores (baseado na estrutura real)
         $categoria_id = $dados['categoria_id'] ?? 2; // Ferramentas existe
         $unidade_id = $dados['unidade_medida_id'] ?? 1;
-        $local_id = $dados['local_id'] ?? 1;
-        $estoque_atual = $dados['estoque_atual'] ?? 0;
+        $local_id = isset($dados['local_id']) ? $dados['local_id'] : null; // Permitir nulo
         $ponto_reposicao = $dados['ponto_reposicao'] ?? 0;
         $estoque_maximo = $dados['estoque_maximo'] ?? 0;
-        
+
         // Inserir material (campos obrigatórios baseados na estrutura)
-        $stmt = $conn->prepare('INSERT INTO materiais (nome, codigo_sku, categoria_id, unidade_medida_id, empresa_id, local_id, estoque_atual, ponto_reposicao, estoque_maximo, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
-        $stmt->bind_param('ssiiiiddd', 
-            $dados['nome'], 
-            $codigo_sku, 
+        $stmt = $conn->prepare('INSERT INTO materiais (nome, codigo_sku, categoria_id, unidade_medida_id, empresa_id, local_id, ponto_reposicao, estoque_maximo, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)');
+        $stmt->bind_param('ssiiiddd',
+            $dados['nome'],
+            $codigo_sku,
             $categoria_id,
-            $unidade_id, 
-            $dados['empresa_id'], 
+            $unidade_id,
+            $dados['empresa_id'],
             $local_id,
-            $estoque_atual,
             $ponto_reposicao,
             $estoque_maximo
         );
@@ -1735,10 +1733,19 @@ if ($tipo === 'entrada') {
             $stmt->bind_param('sidisis', $dados['data_entrada'], $material_id, $quantidade, $dados['nota_fiscal'], $dados['responsavel_id'], $dados['local_destino_id'], $dados['observacao']);
             $stmt->execute();
             
-            // Atualizar estoque
+            // Atualizar estoque e local do material
             $novo_estoque = $material['estoque_atual'] + $quantidade;
-            $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
-            $stmt->bind_param('di', $novo_estoque, $material_id);
+            $local_destino_id = $dados['local_destino_id'] ?? null;
+
+            if ($local_destino_id) {
+                // Atualizar estoque e local do material
+                $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ?, local_id = ? WHERE id = ?');
+                $stmt->bind_param('dii', $novo_estoque, $local_destino_id, $material_id);
+            } else {
+                // Atualizar apenas estoque se não for especificado local
+                $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+                $stmt->bind_param('di', $novo_estoque, $material_id);
+            }
             $stmt->execute();
             
             $conn->commit();
@@ -1777,41 +1784,48 @@ if ($tipo === 'saida') {
         
         $conn->begin_transaction();
         try {
-            // Verificar estoque disponível
-            $stmt = $conn->prepare('SELECT estoque_atual FROM materiais WHERE id = ?');
+            // Verificar estoque disponível e local do material
+            $stmt = $conn->prepare('SELECT estoque_atual, local_id FROM materiais WHERE id = ?');
             $stmt->bind_param('i', $material_id);
             $stmt->execute();
             $material = $stmt->get_result()->fetch_assoc();
-            
+
             if (!$material) {
                 throw new Exception('Material não encontrado');
             }
-            
+
             if ($material['estoque_atual'] < $quantidade) {
                 throw new Exception('Estoque insuficiente. Disponível: ' . $material['estoque_atual']);
             }
-            
+
+            // Verificar se o local de origem coincide com o local atual do material (se local de origem for especificado)
+            if (!empty($dados['local_origem_id']) && $material['local_id'] != $dados['local_origem_id']) {
+                throw new Exception('O material não está no local de origem selecionado. Local atual: ' . ($material['local_id'] ?? 'Não definido'));
+            }
+
             // Registrar saída
-            $stmt = $conn->prepare('INSERT INTO movimentacoes_saida 
-                (data_saida, material_id, quantidade, empresa_solicitante_id, finalidade, observacao) 
-                VALUES (?, ?, ?, ?, ?, ?)');
-            
+            $stmt = $conn->prepare('INSERT INTO movimentacoes_saida
+                (data_saida, material_id, quantidade, empresa_solicitante_id, local_origem_id, finalidade, observacao)
+                VALUES (?, ?, ?, ?, ?, ?, ?)');
+
             $data_saida = $dados['data_saida'];
             $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
+            $local_origem_id = isset($dados['local_origem_id']) ? intval($dados['local_origem_id']) : null;
             $finalidade = $dados['finalidade'] ?? '';
             $observacao = $dados['observacao'] ?? '';
-            
-            // data(s), material(i), qtd(d), empresa(i), fin(s), obs(s)
-            $stmt->bind_param('sidiss', 
-                $data_saida, 
-                $material_id, 
-                $quantidade, 
-                $empresa_id, 
-                $finalidade, 
+
+            // data(s), material(i), qtd(d), empresa(i), local(i), fin(s), obs(s)
+            $stmt->bind_param('sidisss',
+                $data_saida,
+                $material_id,
+                $quantidade,
+                $empresa_id,
+                $local_origem_id,
+                $finalidade,
                 $observacao
             );
             $stmt->execute();
-            
+
             // Atualizar estoque
             $novo_estoque = $material['estoque_atual'] - $quantidade;
             $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');

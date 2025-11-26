@@ -424,10 +424,6 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Estoque Atual</label>
-                            <input type="number" id="mat-estoque" placeholder="0" value="0" step="0.01">
-                        </div>
-                        <div class="form-group">
                             <label>Ponto de Reposição</label>
                             <input type="number" id="mat-reposicao" placeholder="0" step="0.01">
                         </div>
@@ -536,6 +532,14 @@
                                 <div id="sai-material-lista" class="material-autocomplete"></div>
                             </div>
                         </div>
+                        <div class="form-group">
+                            <label>Local de Origem *</label>
+                            <select id="sai-local-origem">
+                                <option value="">Selecione o local de origem...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
                         <div class="form-group">
                             <label>Quantidade *</label>
                             <input type="number" id="sai-quantidade" placeholder="0" step="0.01">
@@ -1918,8 +1922,7 @@
                 categoria_id: parseInt(categoria),
                 unidade_medida_id: parseInt(document.getElementById('mat-unidade').value),
                 empresa_id: parseInt(empresa),
-                local_id: parseInt(document.getElementById('mat-local').value) || 1,
-                estoque_atual: parseFloat(document.getElementById('mat-estoque').value) || 0,
+                local_id: parseInt(document.getElementById('mat-local').value) || null, // Permitir nulo no cadastro
                 ponto_reposicao: parseFloat(document.getElementById('mat-reposicao').value) || 0,
                 estoque_maximo: parseFloat(document.getElementById('mat-maximo').value) || 0
             };
@@ -1932,7 +1935,6 @@
                 document.getElementById('mat-sku').readOnly = true;
                 document.getElementById('mat-categoria').value = '';
                 document.getElementById('mat-empresa').value = '';
-                document.getElementById('mat-estoque').value = '0';
                 document.getElementById('mat-reposicao').value = '';
                 document.getElementById('mat-maximo').value = '';
                 carregarMateriais();
@@ -2323,41 +2325,99 @@
         }
         
         let materiaisSaida = [];
-        
+        let locaisDisponiveis = [];
+
+        async function carregarLocaisSaida(empresaId) {
+            const selectLocal = document.getElementById('sai-local-origem');
+
+            if (!empresaId) {
+                selectLocal.innerHTML = '<option value="">Selecione o local de origem...</option>';
+                selectLocal.disabled = true;
+                return;
+            }
+
+            selectLocal.innerHTML = '<option value="">Carregando locais...</option>';
+            selectLocal.disabled = true;
+
+            try {
+                const resultado = await chamarAPI('locais', 'listar');
+
+                if (resultado.sucesso && resultado.dados) {
+                    locaisDisponiveis = resultado.dados;
+
+                    // Filtrar locais que pertencem à empresa ou são compartilhados
+                    let html = '<option value="">Selecione o local de origem...</option>';
+                    const locaisEmpresa = locaisDisponiveis.filter(local => {
+                        // Se o local tem empresas_ids e não for "ALL", verificar se empresa faz parte
+                        if (local.empresas_ids) {
+                            const ids = local.empresas_ids.split(',').map(id => parseInt(id.trim()));
+                            return ids.includes(parseInt(empresaId));
+                        }
+                        return true; // Se não tiver restrição, mostrar
+                    });
+
+                    locaisEmpresa.forEach(local => {
+                        html += `<option value="${local.id}">${local.nome}</option>`;
+                    });
+
+                    selectLocal.innerHTML = html;
+                    selectLocal.disabled = false;
+                } else {
+                    selectLocal.innerHTML = '<option value="">Nenhum local encontrado</option>';
+                    selectLocal.disabled = true;
+                }
+            } catch (error) {
+                selectLocal.innerHTML = '<option value="">Erro ao carregar locais</option>';
+                selectLocal.disabled = true;
+            }
+        }
+
         async function carregarMateriaisSaida(empresaId) {
             const inputBusca = document.getElementById('sai-material-busca');
             const inputHidden = document.getElementById('sai-material');
-            
+
             if (!empresaId) {
                 inputBusca.placeholder = 'Selecione a empresa primeiro';
                 inputBusca.disabled = true;
                 inputBusca.value = '';
                 inputHidden.value = '';
                 materiaisSaida = [];
+                // Limpar também o select de locais
+                document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o local de origem...</option>';
+                document.getElementById('sai-local-origem').disabled = true;
                 return;
             }
-            
+
             inputBusca.placeholder = 'Carregando materiais...';
             inputBusca.disabled = true;
-            
+
             try {
                 const resultado = await chamarAPI('materiais', 'por_empresa', null, `&empresa_id=${empresaId}`);
-                
+
                 if (resultado.sucesso && resultado.dados) {
                     materiaisSaida = resultado.dados;
                     inputBusca.placeholder = 'Digite para buscar material...';
                     inputBusca.disabled = false;
                     inputBusca.value = '';
                     inputHidden.value = '';
+
+                    // Carregar os locais após carregar os materiais
+                    await carregarLocaisSaida(empresaId);
                 } else {
                     materiaisSaida = [];
                     inputBusca.placeholder = 'Nenhum material encontrado';
                     inputBusca.disabled = true;
+                    // Limpar também o select de locais
+                    document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o local de origem...</option>';
+                    document.getElementById('sai-local-origem').disabled = true;
                 }
             } catch (error) {
                 materiaisSaida = [];
                 inputBusca.placeholder = 'Erro ao carregar materiais';
                 inputBusca.disabled = true;
+                // Limpar também o select de locais
+                document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o local de origem...</option>';
+                document.getElementById('sai-local-origem').disabled = true;
             }
         }
         
@@ -2406,11 +2466,16 @@
         }
 
         async function registrarSaida() {
+            // Obter local de origem, se existir
+            const localOrigemSelect = document.getElementById('sai-local-origem');
+            const localOrigemId = localOrigemSelect.value ? parseInt(localOrigemSelect.value) : null;
+
             const dados = {
                 data_saida: document.getElementById('sai-data').value,
                 material_id: parseInt(document.getElementById('sai-material').value),
                 quantidade: parseFloat(document.getElementById('sai-quantidade').value),
                 empresa_solicitante_id: parseInt(document.getElementById('sai-empresa').value),
+                local_origem_id: localOrigemId, // Novo campo para local de origem
                 observacao: document.getElementById('sai-obs').value,
                 finalidade: document.getElementById('sai-obs').value // Usar observação como finalidade também
             };
@@ -2419,9 +2484,14 @@
                 exibirNotificacaoSistema('Preencha todos os campos obrigatórios (Material, Quantidade e Finalidade)', 'warning');
                 return;
             }
-            
+
             if (!dados.empresa_solicitante_id) {
                 exibirNotificacaoSistema('Selecione a empresa', 'warning');
+                return;
+            }
+
+            if (!localOrigemId) {
+                exibirNotificacaoSistema('Selecione o local de origem do material', 'warning');
                 return;
             }
 
@@ -2430,8 +2500,9 @@
                 exibirNotificacaoSistema('Saída registrada com sucesso!', 'success');
                 document.getElementById('sai-quantidade').value = '';
                 document.getElementById('sai-obs').value = '';
-                // Limpar seleção de material mas manter empresa
+                // Limpar seleção de material e local de origem, mas manter empresa
                 document.getElementById('sai-material').value = '';
+                document.getElementById('sai-local-origem').value = '';
                 carregarSaidas();
             } else {
                 exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
