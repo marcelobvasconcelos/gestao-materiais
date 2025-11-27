@@ -1268,40 +1268,28 @@ if ($tipo === 'materiais') {
             exit;
         }
 
-        // Buscar estoque por local considerando entradas e saídas
+        // Buscar estoque por local considerando entradas e saídas (Corrigido para evitar produto cartesiano)
         $query = "SELECT
                     l.id as local_id,
                     l.nome as local_nome,
-                    COALESCE(SUM(
-                        CASE
-                            WHEN me.local_destino_id = l.id THEN me.quantidade
-                            ELSE 0
-                        END
-                    ), 0) as entrada_no_local,
-                    COALESCE(SUM(
-                        CASE
-                            WHEN ms.local_origem_id = l.id THEN ms.quantidade
-                            ELSE 0
-                        END
-                    ), 0) as saida_do_local,
-                    (COALESCE(SUM(
-                        CASE
-                            WHEN me.local_destino_id = l.id THEN me.quantidade
-                            ELSE 0
-                        END
-                    ), 0) - COALESCE(SUM(
-                        CASE
-                            WHEN ms.local_origem_id = l.id THEN ms.quantidade
-                            ELSE 0
-                        END
-                    ), 0)) as estoque_no_local
+                    COALESCE(entradas.total, 0) as entrada_no_local,
+                    COALESCE(saidas.total, 0) as saida_do_local,
+                    (COALESCE(entradas.total, 0) - COALESCE(saidas.total, 0)) as estoque_no_local
                   FROM locais_armazenamento l
-                  LEFT JOIN movimentacoes_entrada me ON me.material_id = ? AND me.local_destino_id = l.id
-                  LEFT JOIN movimentacoes_saida ms ON ms.material_id = ? AND ms.local_origem_id = l.id
+                  LEFT JOIN (
+                      SELECT local_destino_id, SUM(quantidade) as total
+                      FROM movimentacoes_entrada
+                      WHERE material_id = ?
+                      GROUP BY local_destino_id
+                  ) entradas ON l.id = entradas.local_destino_id
+                  LEFT JOIN (
+                      SELECT local_origem_id, SUM(quantidade) as total
+                      FROM movimentacoes_saida
+                      WHERE material_id = ?
+                      GROUP BY local_origem_id
+                  ) saidas ON l.id = saidas.local_origem_id
                   WHERE l.ativo = 1
-                    AND (me.local_destino_id IS NOT NULL OR ms.local_origem_id IS NOT NULL) -- Apenas locais com movimentação
-                  GROUP BY l.id, l.nome
-                  HAVING estoque_no_local > 0  -- Apenas locais com estoque positivo
+                  HAVING estoque_no_local > 0
                   ORDER BY l.nome";
 
         $stmt = $conn->prepare($query);
@@ -1562,6 +1550,7 @@ if ($tipo === 'usuarios') {
         } else {
             echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar']);
         }
+        exit;
     }
 
     if ($acao === 'excluir') {
@@ -2045,21 +2034,24 @@ if ($tipo === 'saida') {
 
                 $quantidade_total_informada += $quantidade_local;
 
-                // Verificar estoque específico para este local
+                // Verificar estoque específico para este local (Corrigido para evitar produto cartesiano)
                 $stmt = $conn->prepare('
                     SELECT
-                        COALESCE(SUM(me.quantidade), 0) as entrada_local,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN ms.local_origem_id = ? THEN ms.quantidade
-                                ELSE 0
-                            END
-                        ), 0) as saida_local
-                    FROM movimentacoes_entrada me
-                    LEFT JOIN movimentacoes_saida ms ON me.material_id = ms.material_id
-                    WHERE me.material_id = ? AND me.local_destino_id = ?
+                        COALESCE(entradas.total, 0) as entrada_local,
+                        COALESCE(saidas.total, 0) as saida_local
+                    FROM (SELECT 1) as dummy
+                    LEFT JOIN (
+                        SELECT SUM(quantidade) as total
+                        FROM movimentacoes_entrada
+                        WHERE material_id = ? AND local_destino_id = ?
+                    ) entradas ON 1=1
+                    LEFT JOIN (
+                        SELECT SUM(quantidade) as total
+                        FROM movimentacoes_saida
+                        WHERE material_id = ? AND local_origem_id = ?
+                    ) saidas ON 1=1
                 ');
-                $stmt->bind_param('iii', $local_id, $material_id, $local_id);
+                $stmt->bind_param('iiii', $material_id, $local_id, $material_id, $local_id);
                 $stmt->execute();
                 $result = $stmt->get_result();
                 $estoque_local = $result->fetch_assoc();
@@ -2101,6 +2093,12 @@ if ($tipo === 'saida') {
                 );
                 $stmt->execute();
             }
+
+            // Atualizar estoque global do material
+            $novo_estoque = $material['estoque_atual'] - $quantidade_total;
+            $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+            $stmt->bind_param('di', $novo_estoque, $material_id);
+            $stmt->execute();
 
             $conn->commit();
             echo json_encode(['sucesso' => true, 'mensagem' => 'Saída registrada com sucesso em múltiplos locais']);

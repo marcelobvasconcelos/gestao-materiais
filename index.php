@@ -875,44 +875,50 @@
 
                 <!-- MODAL DE EDIÇÃO -->
                 <div id="modal-editar-usuario" class="modal">
-                    <div class="modal-content">
+                    <div class="modal-content" style="max-width: 800px;">
                         <div class="modal-header">Editar Usuário</div>
-                        <form>
-                            <div class="form-group">
-                                <label>Nome Completo</label>
-                                <input type="text" id="edit-usr-nome">
-                            </div>
-                            <div class="form-group">
-                                <label>Email</label>
-                                <input type="email" id="edit-usr-email">
-                            </div>
-                            <div class="form-group">
-                                <label>Perfil de Acesso</label>
-                                <select id="edit-usr-perfil">
-                                    <option value="1">Administrador</option>
-                                    <option value="2">Gestor</option>
-                                    <option value="3">Operador</option>
-                                    <option value="4">Consulta</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Departamento</label>
-                                <input type="text" id="edit-usr-departamento">
-                            </div>
-                            <div class="form-group" id="edit-empresas-vinculo">
-                                <label>Empresas Vinculadas</label>
-                                <div style="margin-bottom: 8px;">
-                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 5px;" onclick="selecionarTodasEmpresas('edit-usr-empresas', true)">Selecionar Todas</button>
-                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="selecionarTodasEmpresas('edit-usr-empresas', false)">Desmarcar Todas</button>
+                        <div style="padding: 30px;">
+                            <form>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Nome Completo</label>
+                                        <input type="text" id="edit-usr-nome">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Email</label>
+                                        <input type="email" id="edit-usr-email">
+                                    </div>
                                 </div>
-                                <div id="edit-usr-empresas-checkboxes" class="empresas-checkbox-container">
-                                    <!-- Checkboxes serão carregados aqui -->
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Perfil de Acesso</label>
+                                        <select id="edit-usr-perfil">
+                                            <option value="1">Administrador</option>
+                                            <option value="2">Gestor</option>
+                                            <option value="3">Operador</option>
+                                            <option value="4">Consulta</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Departamento</label>
+                                        <input type="text" id="edit-usr-departamento">
+                                    </div>
                                 </div>
+                                <div class="form-group" id="edit-empresas-vinculo">
+                                    <label>Empresas Vinculadas</label>
+                                    <div style="margin-bottom: 8px;">
+                                        <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 5px;" onclick="selecionarTodasEmpresas('edit-usr-empresas', true)">Selecionar Todas</button>
+                                        <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px;" onclick="selecionarTodasEmpresas('edit-usr-empresas', false)">Desmarcar Todas</button>
+                                    </div>
+                                    <div id="edit-usr-empresas-checkboxes" class="empresas-checkbox-container">
+                                        <!-- Checkboxes serão carregados aqui -->
+                                    </div>
+                                </div>
+                            </form>
+                            <div class="modal-footer" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                                <button class="btn btn-secondary" onclick="fecharModalEdicao()">Cancelar</button>
+                                <button class="btn btn-primary" onclick="salvarEdicaoUsuario()">Salvar</button>
                             </div>
-                        </form>
-                        <div class="modal-footer">
-                            <button class="btn btn-secondary" onclick="fecharModalEdicao()">Cancelar</button>
-                            <button class="btn btn-primary" onclick="salvarEdicaoUsuario()">Salvar</button>
                         </div>
                     </div>
                 </div>
@@ -975,7 +981,7 @@
 
             <div class="footer" style="display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: auto; padding: 20px; border-top: 1px solid #e2e8f0;">
                 <img src="logo-devops.png" alt="Logo STI" style="height: 25px;">
-                <span style="font-size: 0.85rem; color: #64748b;">&copy; 2025 UAST/UFRPE - Desenvolvido pelo <a href="https://uast.ufrpe.br/sti" target="_blank" style="color: var(--accent-color); text-decoration: none; font-weight: 500;">STI-UAST</a></span>
+                <span style="font-size: 0.85rem; color: #64748b;">&copy; 2025 UAST/UFRPE - Desenvolvido pela <a href="https://uast.ufrpe.br/sti" target="_blank" style="color: var(--accent-color); text-decoration: none; font-weight: 500;">Seção de Tecnologia da Informação STI-UAST</a></span>
             </div>
         </div>
     </div>
@@ -1882,6 +1888,7 @@
                             <td>${mat.estoque_atual || 0}</td>
                             <td>${mat.empresa_nome || ''}</td>
                             <td>
+                                <button class="btn btn-info btn-sm" onclick="verEstoquePorLocal(${mat.id}, '${nomeEscaped}')" style="margin-right: 5px; padding: 5px 10px; font-size: 12px; background-color: #0ea5e9; color: white; border: none;">📍 Locais</button>
                                 <button class="btn btn-secondary btn-sm" onclick="editarMaterialGeral(${mat.id})" style="margin-right: 5px; padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
                                 <button class="btn btn-danger btn-sm" onclick="excluirMaterialGeral(${mat.id}, '${nomeEscaped}', ${mat.estoque_atual || 0})" style="padding: 5px 10px; font-size: 12px;">🗑️ Excluir</button>
                             </td>
@@ -3695,6 +3702,63 @@
                 observer.observe(perfilSection, { attributes: true, attributeFilter: ['class'] });
             }
         });
+    </script>
+    <div id="modal-estoque-local" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">Estoque por Local: <span id="titulo-material-estoque" style="font-weight: normal;"></span></div>
+            <div style="padding: 20px;">
+                <table class="table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Local</th>
+                            <th style="text-align: right;">Quantidade</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-estoque-local-body">
+                        <!-- Dados aqui -->
+                    </tbody>
+                </table>
+                <div style="margin-top: 20px; text-align: right;">
+                    <button class="btn btn-secondary" onclick="fecharModalEstoque()">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function fecharModalEstoque() {
+            document.getElementById('modal-estoque-local').style.display = 'none';
+        }
+
+        async function verEstoquePorLocal(id, nome) {
+            const modal = document.getElementById('modal-estoque-local');
+            const titulo = document.getElementById('titulo-material-estoque');
+            const tbody = document.getElementById('tabela-estoque-local-body');
+            
+            titulo.textContent = nome;
+            tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 20px;">Carregando...</td></tr>';
+            modal.style.display = 'flex';
+            
+            try {
+                const resultado = await chamarAPI('materiais', 'estoque_por_local', null, `material_id=${id}`);
+                
+                if (resultado.sucesso && resultado.dados && resultado.dados.length > 0) {
+                    let html = '';
+                    resultado.dados.forEach(item => {
+                        html += `<tr>
+                            <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.local_nome}</td>
+                            <td style="text-align: right; font-weight: bold; padding: 10px; border-bottom: 1px solid #eee;">${item.estoque}</td>
+                        </tr>`;
+                    });
+                    tbody.innerHTML = html;
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 20px; color: #666;">Nenhum estoque encontrado em locais específicos.</td></tr>';
+                }
+            } catch (e) {
+                console.error(e);
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 20px; color: red;">Erro ao carregar estoque.</td></tr>';
+            }
+        }
     </script>
 </body>
 </html>

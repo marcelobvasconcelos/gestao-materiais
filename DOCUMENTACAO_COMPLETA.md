@@ -199,6 +199,7 @@ CREATE TABLE movimentacoes_saida (
     material_id INT NOT NULL,
     quantidade DECIMAL(10,2) NOT NULL,
     empresa_solicitante_id INT,
+    local_origem_id INT,
     finalidade VARCHAR(100),
     responsavel_autorizacao_id INT,
     local_destino VARCHAR(200),
@@ -206,6 +207,7 @@ CREATE TABLE movimentacoes_saida (
     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (material_id) REFERENCES materiais(id),
     FOREIGN KEY (empresa_solicitante_id) REFERENCES empresas_terceirizadas(id),
+    FOREIGN KEY (local_origem_id) REFERENCES locais_armazenamento(id),
     FOREIGN KEY (responsavel_autorizacao_id) REFERENCES usuarios(id)
 );
 ```
