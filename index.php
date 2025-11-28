@@ -508,13 +508,12 @@
                             <label>Quantidade</label>
                             <input type="number" id="ent-quantidade" placeholder="0" step="0.01">
                         </div>
-                    <div class="form-row">
                         <div class="form-group">
                             <label>Nota Fiscal</label>
                             <input type="text" id="ent-nf" placeholder="NF-12345">
                         </div>
                         <div class="form-group">
-                            <label>Responsável <small style="color: #999;">(Opcional - padrão: você)</small></label>
+                            <label>Responsável <small style="color: #999;">(Opcional)</small></label>
                             <select id="ent-responsavel"></select>
                         </div>
                         <div class="form-group">
@@ -526,7 +525,28 @@
                         <label>Observações</label>
                         <textarea id="ent-obs" placeholder="Deixe suas observações" rows="3"></textarea>
                     </div>
-                    <button class="btn btn-primary" onclick="registrarEntrada()">Registrar Entrada</button>
+                    
+                    <div style="margin-bottom: 20px; text-align: right;">
+                        <button class="btn btn-secondary" onclick="adicionarItemEntrada()" style="margin-right: 10px;">+ Adicionar à Lista</button>
+                    </div>
+
+                    <!-- Tabela de Itens Temporários -->
+                    <div id="container-lista-entrada" style="display: none; margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 10px; background: #f8fafc;">
+                        <h3 style="font-size: 1rem; margin-bottom: 10px; color: #334155;">Itens a Registrar</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #e2e8f0; text-align: left;">
+                                    <th style="padding: 8px;">Material</th>
+                                    <th style="padding: 8px;">Qtd</th>
+                                    <th style="padding: 8px;">Local</th>
+                                    <th style="padding: 8px;">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-lista-entrada"></tbody>
+                        </table>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="registrarEntrada()">Registrar Entrada(s)</button>
                 </div>
 
                 <div class="table-container">
@@ -597,6 +617,8 @@
                 <div class="table-container">
                     <h2 style="margin-bottom: 20px;">⚠️ Alertas de Estoque</h2>
                     
+
+    <!-- Modal Editar Entrada -->
                     <!-- Filtro por Empresa -->
                     <div class="form-row" style="margin-bottom: 20px;">
                         <div class="form-group">
@@ -993,24 +1015,6 @@
 
 
             <!-- MODAL DETALHES MATERIAL -->
-            <div id="modal-detalhes-material" class="modal">
-                <div class="modal-content" style="max-width: 800px;">
-                    <div class="modal-header">
-                        <span id="detalhe-titulo">Detalhes do Material</span>
-                        <button class="btn btn-secondary btn-sm" onclick="fecharModalDetalhes()">Fechar</button>
-                    </div>
-                    <div style="padding: 20px;">
-                        <div id="detalhe-info" style="margin-bottom: 20px; padding: 10px; background: #f3f4f6; border-radius: 5px;">
-                            <!-- Info do material -->
-                        </div>
-                        
-                        <h3>Histórico de Movimentações</h3>
-                        <div id="detalhe-historico" style="max-height: 300px; overflow-y: auto; margin-top: 10px;">
-                            <div class="loading"><div class="spinner"></div> Carregando histórico...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
 
             <div class="footer" style="display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: auto; padding: 20px; border-top: 1px solid #e2e8f0;">
@@ -1087,6 +1091,38 @@
         // CONFIGURAÇÃO DA API
         // =====================================================================
         const API_URL = './api_filtrada.php';
+
+        // =====================================================================
+        // VARIÁVEIS GLOBAIS DE PAGINAÇÃO
+        // =====================================================================
+        let offsetEntrada = 0;
+        const limitEntrada = 50;
+        let carregandoEntrada = false;
+        let fimEntrada = false;
+
+        let offsetSaida = 0;
+        const limitSaida = 50;
+        let carregandoSaida = false;
+        let fimSaida = false;
+
+        // Observer para Lazy Loading
+        const observerOptions = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.1
+        };
+
+        const entradaObserver = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !carregandoEntrada && !fimEntrada) {
+                carregarEntradas(true);
+            }
+        }, observerOptions);
+
+        const saidaObserver = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !carregandoSaida && !fimSaida) {
+                carregarSaidas(true);
+            }
+        }, observerOptions);
 
         // =====================================================================
         // FUNÇÕES AUXILIARES
@@ -1494,7 +1530,7 @@
                         <tr ${rowClass}>
                             <td>${icon} ${mov.tipo}</td>
                             <td>${formatarData(mov.data)}</td>
-                            <td>${mov.material}</td>
+                            <td><a href="#" onclick="abrirDetalhesMaterial(${mov.material_id}); return false;" style="font-weight: bold; color: #2563eb; text-decoration: none;">${mov.material}</a></td>
                             <td>${mov.empresa || '-'}</td>
                             <td><strong>${mov.quantidade}</strong></td>
                             <td>${mov.responsavel || '-'}</td>
@@ -1980,7 +2016,7 @@
                     resultado.dados.forEach(mat => {
                         const nomeEscaped = (mat.nome || '').replace(/'/g, "\\'");
                         html += `<tr>
-                            <td>${mat.nome || ''}</td>
+                            <td><a href="#" onclick="abrirDetalhesMaterial(${mat.id}); return false;" style="font-weight: bold; color: #2563eb; text-decoration: none;">${mat.nome || ''}</a></td>
                             <td>${mat.codigo_sku || ''}</td>
                             <td>${mat.estoque_atual || 0}</td>
                             <td>${mat.empresa_nome || ''}</td>
@@ -2302,101 +2338,333 @@
             });
         }
         
-        async function carregarEntradas() {
-            // Carregar empresas e locais
-            await carregarEmpresasParaEntrada();
-            await carregarLocaisEntrada();
-            
-            const resultado = await chamarAPI('entrada', 'listar');
-            if (resultado.sucesso) {
-                let html = '<table><thead><tr><th>Data</th><th>Material</th><th>Quantidade</th><th>Nota Fiscal</th><th>Responsável</th><th>Observação</th></tr></thead><tbody>';
-                resultado.dados.forEach(ent => {
-                    html += `<tr>
-                        <td>${formatarData(ent.data_entrada)}</td>
-                        <td>${ent.material_nome}</td>
-                        <td>${ent.quantidade}</td>
-                        <td>${ent.nota_fiscal}</td>
-                        <td>${ent.responsavel_nome || '-'}</td>
-                        <td>${ent.observacao || '-'}</td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-                document.getElementById('lista-entradas').innerHTML = html;
+        async function carregarEntradas(append = false) {
+            if (carregandoEntrada) return;
+            carregandoEntrada = true;
+
+            if (!append) {
+                // Resetar paginação se não for append
+                offsetEntrada = 0;
+                fimEntrada = false;
+                // Carregar dependências apenas na primeira carga
+                await carregarEmpresasParaEntrada();
+                await carregarLocaisEntrada();
             }
 
-            document.getElementById('ent-data').valueAsDate = new Date();
+            const loadingIndicator = document.getElementById('loading-entrada');
+            if (loadingIndicator) loadingIndicator.style.display = 'block';
+            
+            try {
+                const resultado = await chamarAPI('entrada', 'listar', null, `&limit=${limitEntrada}&offset=${offsetEntrada}`);
+                
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+
+                if (resultado.sucesso) {
+                    const listaContainer = document.getElementById('lista-entradas');
+                    
+                    if (!append) {
+                        listaContainer.innerHTML = `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Data</th><th>Material</th><th>Local</th><th>Quantidade</th><th>Nota Fiscal</th><th>Responsável</th><th>Observação</th><th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-entradas"></tbody>
+                            </table>
+                            <div id="sentinela-entrada" style="height: 20px; margin-top: 10px;"></div>
+                            <div id="loading-entrada" style="display: none; text-align: center; padding: 10px;">Carregando mais...</div>
+                        `;
+                        // Iniciar observador
+                        const sentinela = document.getElementById('sentinela-entrada');
+                        if (sentinela) entradaObserver.observe(sentinela);
+                    }
+
+                    const tbody = document.getElementById('tbody-entradas');
+                    
+                    if (resultado.dados.length < limitEntrada) {
+                        fimEntrada = true;
+                        if (document.getElementById('sentinela-entrada')) {
+                            entradaObserver.unobserve(document.getElementById('sentinela-entrada'));
+                            document.getElementById('sentinela-entrada').style.display = 'none';
+                        }
+                    }
+
+                    if (resultado.dados.length === 0 && !append) {
+                        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Nenhuma entrada registrada</td></tr>';
+                    } else {
+                        let html = '';
+                        resultado.dados.forEach(ent => {
+                            const materialEscaped = (ent.material_nome || '').replace(/'/g, "\\'");
+                            const obsEscaped = (ent.observacao || '').replace(/'/g, "\\'");
+                            const nfEscaped = (ent.nota_fiscal || '').replace(/'/g, "\\'");
+                            
+                            html += `<tr>
+                                <td>${formatarData(ent.data_entrada)}</td>
+                                <td><a href="#" onclick="abrirDetalhesMaterial(${ent.material_id}); return false;" style="color: #2563eb; text-decoration: none;">${ent.material_nome}</a></td>
+                                <td>${ent.local_nome || '-'}</td>
+                                <td>${ent.quantidade}</td>
+                                <td>${ent.nota_fiscal}</td>
+                                <td>${ent.responsavel_nome || '-'}</td>
+                                <td>${ent.observacao || '-'}</td>
+                                <td>
+                                    <button class="btn btn-secondary btn-sm" onclick="editarMovimentacao(${ent.id}, 'Entrada', '${materialEscaped}', ${ent.quantidade}, '${nfEscaped}', '${obsEscaped}', ${ent.local_destino_id || ''})" style="margin-right: 5px; padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
+                                    <button class="btn btn-danger btn-sm" onclick="excluirEntrada(${ent.id}, '${materialEscaped}', ${ent.quantidade})" style="padding: 5px 10px; font-size: 12px;">🗑️ Excluir</button>
+                                </td>
+                            </tr>`;
+                        });
+                        tbody.insertAdjacentHTML('beforeend', html);
+                        offsetEntrada += resultado.dados.length;
+                    }
+                }
+            } catch (error) {
+                console.error('Erro ao carregar entradas:', error);
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+            } finally {
+                carregandoEntrada = false;
+            }
+
+            if (!append) {
+                document.getElementById('ent-data').valueAsDate = new Date();
+            }
         }
 
-        async function registrarEntrada() {
-            const dados = {
-                data_entrada: document.getElementById('ent-data').value,
-                material_id: parseInt(document.getElementById('ent-material').value),
-                quantidade: parseFloat(document.getElementById('ent-quantidade').value),
-                nota_fiscal: document.getElementById('ent-nf').value,
-                responsavel_id: parseInt(document.getElementById('ent-responsavel').value) || null,
-                local_destino_id: parseInt(document.getElementById('ent-local').value),
-                observacao: document.getElementById('ent-obs').value
-            };
-
-            if (!dados.material_id || !dados.quantidade) {
-                exibirNotificacaoSistema('Selecione material e quantidade', 'warning');
+        async function excluirEntrada(id, material, qtd) {
+            if (!confirm(`Tem certeza que deseja excluir a entrada de ${qtd} unidades do material "${material}"?\n\nO estoque será reduzido automaticamente.`)) {
                 return;
             }
 
-            const resultado = await chamarAPI('entrada', 'criar', dados);
+            const resultado = await chamarAPI('entrada', 'excluir', { id: id });
+            
             if (resultado.sucesso) {
-                exibirNotificacaoSistema('Entrada registrada com sucesso!', 'success');
-                document.getElementById('ent-quantidade').value = '';
-                document.getElementById('ent-nf').value = '';
-                document.getElementById('ent-obs').value = '';
+                exibirNotificacaoSistema(resultado.mensagem || 'Entrada excluída com sucesso!', 'success');
                 carregarEntradas();
+                // Atualizar dashboard se estiver visível
+                if (document.getElementById('dashboard').classList.contains('active')) {
+                    carregarResumoGeral();
+                }
             } else {
                 exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+            }
+        }
+
+
+        let itensEntrada = [];
+
+        function adicionarItemEntrada() {
+            const materialId = parseInt(document.getElementById('ent-material').value);
+            const materialNome = document.getElementById('ent-material-busca').value;
+            const quantidade = parseFloat(document.getElementById('ent-quantidade').value);
+            const localId = parseInt(document.getElementById('ent-local').value);
+            const localNome = document.getElementById('ent-local').options[document.getElementById('ent-local').selectedIndex]?.text || '-';
+            
+            if (!materialId || !quantidade || quantidade <= 0) {
+                exibirNotificacaoSistema('Selecione um material e uma quantidade válida', 'warning');
+                return;
+            }
+
+            // Adicionar ao array
+            itensEntrada.push({
+                material_id: materialId,
+                material_nome: materialNome,
+                quantidade: quantidade,
+                local_destino_id: localId,
+                local_nome: localNome
+            });
+
+            atualizarTabelaItensEntrada();
+            
+            // Limpar campos de item
+            document.getElementById('ent-material').value = '';
+            document.getElementById('ent-material-busca').value = '';
+            document.getElementById('ent-quantidade').value = '';
+            // Manter local selecionado para facilitar
+        }
+
+        function removerItemEntrada(index) {
+            itensEntrada.splice(index, 1);
+            atualizarTabelaItensEntrada();
+        }
+
+        function atualizarTabelaItensEntrada() {
+            const tbody = document.getElementById('tbody-lista-entrada');
+            const container = document.getElementById('container-lista-entrada');
+            
+            if (itensEntrada.length === 0) {
+                container.style.display = 'none';
+                tbody.innerHTML = '';
+                return;
+            }
+
+            container.style.display = 'block';
+            let html = '';
+            
+            itensEntrada.forEach((item, index) => {
+                html += `
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 8px;">${item.material_nome}</td>
+                        <td style="padding: 8px;">${item.quantidade}</td>
+                        <td style="padding: 8px;">${item.local_nome}</td>
+                        <td style="padding: 8px;">
+                            <button class="btn btn-danger btn-sm" onclick="removerItemEntrada(${index})" style="padding: 2px 8px; font-size: 12px;">X</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = html;
+        }
+
+        async function registrarEntrada() {
+            // Dados comuns
+            const dataEntrada = document.getElementById('ent-data').value;
+            const notaFiscal = document.getElementById('ent-nf').value;
+            const responsavelId = parseInt(document.getElementById('ent-responsavel').value) || null;
+            const observacao = document.getElementById('ent-obs').value;
+
+            // Se houver itens na lista, usar modo múltiplo
+            if (itensEntrada.length > 0) {
+                const dados = {
+                    itens: itensEntrada.map(item => ({
+                        ...item,
+                        data_entrada: dataEntrada,
+                        nota_fiscal: notaFiscal,
+                        responsavel_id: responsavelId,
+                        observacao: observacao
+                    }))
+                };
+
+                const resultado = await chamarAPI('entrada', 'criar_multipla', dados);
+                if (resultado.sucesso) {
+                    exibirNotificacaoSistema(resultado.mensagem || 'Entradas registradas com sucesso!', 'success');
+                    // Limpar tudo
+                    itensEntrada = [];
+                    atualizarTabelaItensEntrada();
+                    document.getElementById('ent-nf').value = '';
+                    document.getElementById('ent-obs').value = '';
+                    carregarEntradas();
+                } else {
+                    exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+                }
+            } 
+            // Se não houver itens na lista, tentar registrar o item dos campos (modo simples)
+            else {
+                const dados = {
+                    data_entrada: dataEntrada,
+                    material_id: parseInt(document.getElementById('ent-material').value),
+                    quantidade: parseFloat(document.getElementById('ent-quantidade').value),
+                    nota_fiscal: notaFiscal,
+                    responsavel_id: responsavelId,
+                    local_destino_id: parseInt(document.getElementById('ent-local').value),
+                    observacao: observacao
+                };
+
+                if (!dados.material_id || !dados.quantidade) {
+                    exibirNotificacaoSistema('Adicione itens à lista ou preencha material e quantidade', 'warning');
+                    return;
+                }
+
+                const resultado = await chamarAPI('entrada', 'criar', dados);
+                if (resultado.sucesso) {
+                    exibirNotificacaoSistema('Entrada registrada com sucesso!', 'success');
+                    document.getElementById('ent-quantidade').value = '';
+                    document.getElementById('ent-nf').value = '';
+                    document.getElementById('ent-obs').value = '';
+                    document.getElementById('ent-material').value = '';
+                    document.getElementById('ent-material-busca').value = '';
+                    carregarEntradas();
+                } else {
+                    exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+                }
             }
         }
 
         // =====================================================================
         // SAÍDA DE MATERIAIS
         // =====================================================================
-        async function carregarSaidas() {
-            // Carregar empresas do usuário
-            await carregarEmpresasParaSaida();
-            
-            const resultado = await chamarAPI('saida', 'listar');
-            if (resultado.sucesso) {
-                let html = '<table><thead><tr><th>Data</th><th>Material</th><th>Quantidade</th><th>Empresa</th><th>Finalidade/Observação</th></tr></thead><tbody>';
-                resultado.dados.forEach(sai => {
-                    html += `<tr>
-                        <td>${formatarData(sai.data)}</td>
-                        <td>${sai.material_nome}</td>
-                        <td>${sai.quantidade}</td>
-                        <td>${sai.empresa_nome || '-'}</td>
-                        <td>${sai.observacao || sai.finalidade || '-'}</td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-                document.getElementById('lista-saidas').innerHTML = html;
+        async function carregarSaidas(append = false) {
+            if (carregandoSaida) return;
+            carregandoSaida = true;
+
+            if (!append) {
+                offsetSaida = 0;
+                fimSaida = false;
+                await carregarEmpresasParaSaida();
             }
 
-            // Data padrão = hoje
-            document.getElementById('sai-data').valueAsDate = new Date();
+            const loadingIndicator = document.getElementById('loading-saida');
+            if (loadingIndicator) loadingIndicator.style.display = 'block';
             
-            // Event listener para busca de materiais
-            const inputBuscaSaida = document.getElementById('sai-material-busca');
-            if (inputBuscaSaida) {
-                inputBuscaSaida.addEventListener('input', function() {
-                    buscarMateriaisSaida(this.value);
-                });
-            }
-            
-            // Fechar lista ao clicar fora
-            document.addEventListener('click', function(e) {
-                const listaSaida = document.getElementById('sai-material-lista');
-                if (listaSaida && !e.target.closest('.form-group')) {
-                    listaSaida.style.display = 'none';
+            try {
+                const resultado = await chamarAPI('saida', 'listar', null, `&limit=${limitSaida}&offset=${offsetSaida}`);
+                
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+
+                if (resultado.sucesso) {
+                    const listaContainer = document.getElementById('lista-saidas');
+                    
+                    if (!append) {
+                        listaContainer.innerHTML = `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Data</th><th>Material</th><th>Quantidade</th><th>Empresa</th><th>Finalidade/Observação</th><th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-saidas"></tbody>
+                            </table>
+                            <div id="sentinela-saida" style="height: 20px; margin-top: 10px;"></div>
+                            <div id="loading-saida" style="display: none; text-align: center; padding: 10px;">Carregando mais...</div>
+                        `;
+                        const sentinela = document.getElementById('sentinela-saida');
+                        if (sentinela) saidaObserver.observe(sentinela);
+                    }
+
+                    const tbody = document.getElementById('tbody-saidas');
+
+                    if (resultado.dados.length < limitSaida) {
+                        fimSaida = true;
+                        if (document.getElementById('sentinela-saida')) {
+                            saidaObserver.unobserve(document.getElementById('sentinela-saida'));
+                            document.getElementById('sentinela-saida').style.display = 'none';
+                        }
+                    }
+
+                    if (resultado.dados.length === 0 && !append) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Nenhuma saída registrada</td></tr>';
+                    } else {
+                        let html = '';
+                        resultado.dados.forEach(sai => {
+                            const materialEscaped = (sai.material_nome || '').replace(/'/g, "\\'");
+                            const obsEscaped = (sai.observacao || '').replace(/'/g, "\\'");
+                            
+                            html += `<tr>
+                                <td>${formatarData(sai.data_saida)}</td>
+                                <td><a href="#" onclick="abrirDetalhesMaterial(${sai.material_id}); return false;" style="color: #2563eb; text-decoration: none;">${sai.material_nome}</a></td>
+                                <td>${sai.quantidade}</td>
+                                <td>${sai.empresa_nome || '-'}</td>
+                                <td>${sai.finalidade || '-'} / ${sai.observacao || '-'}</td>
+                                <td>
+                                    <button class="btn btn-secondary btn-sm" onclick="editarMovimentacao(${sai.id}, 'Saída', '${materialEscaped}', ${sai.quantidade}, '', '${obsEscaped}', ${sai.local_origem_id || ''})" style="margin-right: 5px; padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
+                                </td>
+                            </tr>`;
+                        });
+                        tbody.insertAdjacentHTML('beforeend', html);
+                        offsetSaida += resultado.dados.length;
+                    }
                 }
-            });
+            } catch (error) {
+                console.error('Erro ao carregar saídas:', error);
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+            } finally {
+                carregandoSaida = false;
+            }
+
+            if (!append) {
+                document.getElementById('sai-data').valueAsDate = new Date();
+            }
         }
+
         
         async function carregarEmpresasParaSaida() {
             const usuarioLogado = JSON.parse(localStorage.getItem('usuario_logado'));
@@ -2431,6 +2699,28 @@
                     selectEmpresa.innerHTML = '<option value="">Nenhuma empresa vinculada</option>';
                 }
             }
+
+            // Adicionar event listener para busca de materiais (Saída)
+            const inputBuscaSaida = document.getElementById('sai-material-busca');
+            // Remover listener anterior para evitar duplicação (cloneNode)
+            if (inputBuscaSaida) {
+                const novoInput = inputBuscaSaida.cloneNode(true);
+                inputBuscaSaida.parentNode.replaceChild(novoInput, inputBuscaSaida);
+                
+                novoInput.addEventListener('input', function() {
+                    buscarMateriaisSaida(this.value);
+                });
+                
+                // Re-adicionar foco se necessário (opcional, mas clone perde foco)
+            }
+            
+            // Fechar lista ao clicar fora
+            document.addEventListener('click', function(e) {
+                const listaSaida = document.getElementById('sai-material-lista');
+                if (listaSaida && !e.target.closest('.form-group')) {
+                    listaSaida.style.display = 'none';
+                }
+            });
         }
         
         let materiaisSaida = [];
@@ -2567,7 +2857,7 @@
                     html += '</div>';
                     container.innerHTML = html;
 
-                    // Adicionar eventos para validar quantidades
+                    // Adicionar eventos para validar quantidades e atualizar total
                     document.querySelectorAll('.saida-local-qtd').forEach(input => {
                         input.addEventListener('input', function() {
                             const max = parseFloat(this.getAttribute('data-estoque-max'));
@@ -2578,6 +2868,18 @@
                                 exibirNotificacaoSistema(`Quantidade excede o estoque disponível (${max})`, 'warning');
                             } else if (valor < 0) {
                                 this.value = 0;
+                            }
+
+                            // Calcular soma total
+                            let somaTotal = 0;
+                            document.querySelectorAll('.saida-local-qtd').forEach(inp => {
+                                somaTotal += parseFloat(inp.value) || 0;
+                            });
+                            
+                            // Atualizar campo de quantidade total
+                            const campoTotal = document.getElementById('sai-quantidade-total');
+                            if (campoTotal) {
+                                campoTotal.value = somaTotal > 0 ? somaTotal : '';
                             }
                         });
                     });
@@ -3060,10 +3362,6 @@
             });
         }
         
-        function fecharModalDetalhes() {
-            document.getElementById('modal-detalhes-material').classList.remove('active');
-        }
-        
         // Funções para Baixo Estoque
         async function carregarEmpresasRelatorioBaixoEstoque() {
             const select = document.getElementById('filtro-empresa-baixo');
@@ -3162,14 +3460,14 @@
                 html += '<th>Material</th><th>SKU</th><th>Categoria</th><th>Empresa</th><th>Local</th><th>Estoque</th><th>Ações</th></tr></thead><tbody>';
                 dados.forEach(d => {
                     html += `<tr>
-                        <td><strong>${d.nome}</strong></td>
+                        <td><a href="#" onclick="abrirDetalhesMaterial(${d.id}); return false;" style="font-weight: bold; color: #2563eb; text-decoration: none;">${d.nome}</a></td>
                         <td>${d.codigo_sku}</td>
                         <td>${d.categoria || '-'}</td>
                         <td>${d.empresa || '-'}</td>
                         <td>${d.local || '-'}</td>
                         <td style="font-weight: bold;">${d.estoque_atual}</td>
                         <td>
-                            <button class="btn btn-secondary btn-sm" onclick="verDetalhesMaterial(${d.id}, '${d.nome.replace(/'/g, "\\'")}', '${d.codigo_sku}', ${d.estoque_atual})">
+                            <button class="btn btn-secondary btn-sm" onclick="abrirDetalhesMaterial(${d.id})">
                                 📋 Detalhes
                             </button>
                         </td>
@@ -3524,6 +3822,328 @@
                     exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
                 }
             }
+        }
+
+        // =====================================================================
+        // DETALHES DO MATERIAL E GRÁFICO
+        // =====================================================================
+        let chartMaterial = null;
+        let materialIdAtual = null;
+
+        async function abrirDetalhesMaterial(id) {
+            console.log('Iniciando abertura do modal para material:', id);
+            materialIdAtual = id;
+            const modal = document.getElementById('modal-detalhes-material');
+            
+            if (modal) {
+                // Usar classe active para consistência com CSS e animações
+                modal.classList.add('active');
+                console.log('Classe active adicionada ao modal.');
+                
+                // Resetar filtro para 30 dias
+                const filtro = document.getElementById('filtro-dias-grafico');
+                if (filtro) filtro.value = '30';
+                
+                await carregarHistoricoMaterial(id, 30);
+            } else {
+                console.error('ERRO CRÍTICO: Modal de detalhes não encontrado no DOM!');
+                exibirNotificacaoSistema('Erro interno: Modal não encontrado', 'error');
+            }
+        }
+
+        function fecharModalDetalhesMaterial() {
+            const modal = document.getElementById('modal-detalhes-material');
+            if (modal) modal.classList.remove('active');
+            
+            materialIdAtual = null;
+            if (chartMaterial) {
+                chartMaterial.destroy();
+                chartMaterial = null;
+            }
+        }
+
+        async function gerarRelatorioPDFMaterial() {
+            if (!materialIdAtual) return;
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            // 1. Cabeçalho
+            doc.setFontSize(18);
+            doc.setTextColor(15, 23, 42); // Primary color
+            doc.text('Relatório de Detalhes do Material', 14, 20);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 28);
+            
+            // 2. Informações do Material (Capturar do DOM)
+            const infoBasica = document.getElementById('detalhe-info-basica').innerText.split('\n').filter(l => l.trim());
+            const infoEstoque = document.getElementById('detalhe-info-estoque').innerText.split('\n').filter(l => l.trim());
+            
+            let yPos = 40;
+            
+            doc.setFontSize(14);
+            doc.setTextColor(0);
+            doc.text('Informações Gerais', 14, yPos);
+            yPos += 8;
+            
+            doc.setFontSize(11);
+            doc.setTextColor(60);
+            
+            // Info Básica
+            infoBasica.forEach(line => {
+                doc.text(line, 14, yPos);
+                yPos += 6;
+            });
+            
+            // Info Estoque (lado direito)
+            let yPosRight = 48;
+            infoEstoque.forEach(line => {
+                doc.text(line, 120, yPosRight);
+                yPosRight += 6;
+            });
+            
+            yPos = Math.max(yPos, yPosRight) + 10;
+
+            // 3. Gráfico
+            const canvas = document.getElementById('graficoMaterial');
+            if (canvas) {
+                const imgData = canvas.toDataURL('image/png');
+                doc.addImage(imgData, 'PNG', 14, yPos, 180, 80); // x, y, w, h
+                yPos += 90;
+            }
+
+            // 4. Tabela de Movimentações
+            doc.setFontSize(14);
+            doc.setTextColor(0);
+            doc.text('Histórico de Movimentações (Período Selecionado)', 14, yPos);
+            yPos += 5;
+
+            // Preparar dados da tabela
+            const rows = [];
+            document.querySelectorAll('#tbody-detalhe-movimentacoes tr').forEach(tr => {
+                const rowData = [];
+                tr.querySelectorAll('td').forEach(td => rowData.push(td.innerText));
+                rows.push(rowData);
+            });
+
+            doc.autoTable({
+                startY: yPos,
+                head: [['Data', 'Tipo', 'Quantidade', 'Saldo']],
+                body: rows,
+                theme: 'striped',
+                headStyles: { fillColor: [37, 99, 235] }, // Azul accent
+                styles: { fontSize: 10 },
+                alternateRowStyles: { fillColor: [241, 245, 249] }
+            });
+
+            // Salvar
+            const nomeMaterial = infoBasica[0] || 'material';
+            doc.save(`Relatorio_${nomeMaterial.replace(/[^a-z0-9]/gi, '_')}.pdf`);
+        }
+
+        async function atualizarGraficoMaterial() {
+            if (!materialIdAtual) return;
+            const dias = document.getElementById('filtro-dias-grafico').value;
+            await carregarHistoricoMaterial(materialIdAtual, dias);
+        }
+
+        async function carregarHistoricoMaterial(id, dias) {
+            const containerInfo = document.getElementById('detalhe-info-basica');
+            const containerEstoque = document.getElementById('detalhe-info-estoque');
+            const tbody = document.getElementById('tbody-detalhe-movimentacoes');
+            
+            containerInfo.innerHTML = '<div class="loading"><div class="spinner"></div> Carregando...</div>';
+            
+            try {
+                const resultado = await chamarAPI('materiais', 'historico', null, `&material_id=${id}&dias=${dias}`);
+                
+                if (resultado.sucesso) {
+                    const mat = resultado.material;
+                    const movs = resultado.movimentacoes;
+                    const grafico = resultado.grafico;
+
+                    // Preencher Info Básica
+                    containerInfo.innerHTML = `
+                        <h3 style="margin: 0; color: #1e293b;">${mat.nome}</h3>
+                        <p style="margin: 5px 0; color: #64748b;">SKU: ${mat.codigo_sku}</p>
+                        <p style="margin: 0; color: #64748b;">Categoria: ${mat.categoria_nome || '-'}</p>
+                        <p style="margin: 0; color: #64748b;">Empresa: ${mat.empresa_nome || '-'}</p>
+                    `;
+
+                    // Preencher Info Estoque
+                    const statusClass = mat.estoque_atual <= mat.estoque_minimo ? 'status-inativo' : 'status-ativo';
+                    const statusTexto = mat.estoque_atual <= mat.estoque_minimo ? 'Baixo Estoque' : 'Normal';
+                    
+                    containerEstoque.innerHTML = `
+                        <div style="font-size: 2rem; font-weight: bold; color: #0f172a;">${mat.estoque_atual} <span style="font-size: 1rem; color: #64748b;">${mat.unidade_simbolo || 'un'}</span></div>
+                        <div class="status-badge ${statusClass}" style="display: inline-block;">${statusTexto}</div>
+                        <p style="margin: 5px 0; font-size: 0.9rem;">Mín: ${mat.estoque_minimo} | Máx: ${mat.estoque_maximo}</p>
+                    `;
+
+                    // Renderizar Gráfico
+                    renderizarGraficoMaterial(grafico, mat.nome);
+
+                    // Preencher Tabela de Movimentações
+                    if (movs.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Nenhuma movimentação no período</td></tr>';
+                    } else {
+                        let html = '';
+                        let saldoSimulado = 0; // Opcional: calcular saldo linha a linha se necessário, mas o gráfico já mostra
+                        
+                        // Vamos mostrar as movs do período (invertido para mais recente primeiro na tabela)
+                        const movsInvertidas = [...movs].reverse();
+                        
+                        movsInvertidas.forEach(m => {
+                            const tipoClass = m.tipo === 'entrada' ? 'text-success' : 'text-danger';
+                            const tipoIcon = m.tipo === 'entrada' ? '⬇️ Entrada' : '⬆️ Saída';
+                            const qtdSinal = m.tipo === 'entrada' ? `+${m.quantidade}` : `-${m.quantidade}`;
+                            
+                            html += `
+                                <tr>
+                                    <td>${formatarData(m.data)}</td>
+                                    <td class="${tipoClass}">${tipoIcon}</td>
+                                    <td class="${tipoClass}" style="font-weight: bold;">${qtdSinal}</td>
+                                    <td>-</td> <!-- Saldo histórico é complexo de alinhar na tabela invertida sem recalcular tudo -->
+                                </tr>
+                            `;
+                        });
+                        tbody.innerHTML = html;
+                    }
+
+                } else {
+                    containerInfo.innerHTML = `<p style="color: red;">Erro: ${resultado.erro}</p>`;
+                }
+            } catch (error) {
+                console.error(error);
+                containerInfo.innerHTML = '<p style="color: red;">Erro ao carregar dados.</p>';
+            }
+        }
+
+        function renderizarGraficoMaterial(dados, nomeMaterial) {
+            const ctx = document.getElementById('graficoMaterial').getContext('2d');
+            
+            if (chartMaterial) {
+                chartMaterial.destroy();
+            }
+
+            const labels = dados.map(d => d.data);
+            const saldos = dados.map(d => d.saldo);
+            const entradas = dados.map(d => d.entradas);
+            const saidas = dados.map(d => d.saidas);
+
+            // Verificar se temos dados válidos para mostrar
+            const temSaldo = saldos.some(s => s !== null && s !== undefined && !isNaN(s));
+            const temMovimentacao = entradas.some(e => e !== null && e !== undefined && !isNaN(e)) ||
+                                  saidas.some(s => s !== null && s !== undefined && !isNaN(s));
+
+            // Configurar o gráfico normal com os dados
+            chartMaterial = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Saldo em Estoque',
+                            data: saldos,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 3,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#3b82f6',
+                            fill: false,
+                            tension: 0.3,
+                            yAxisID: 'y',
+                            order: 1
+                        },
+                        {
+                            label: 'Entradas',
+                            data: entradas,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.7)',
+                            borderWidth: 2,
+                            type: 'bar',
+                            yAxisID: 'y1',
+                            order: 2
+                        },
+                        {
+                            label: 'Saídas',
+                            data: saidas,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                            borderWidth: 2,
+                            type: 'bar',
+                            yAxisID: 'y1',
+                            order: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Evolução do Estoque - ' + nomeMaterial
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y;
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Saldo' },
+                            // Adicionando padding para melhor visualização
+                            suggestedMin: temSaldo ? Math.min(...saldos.filter(s => s !== null && !isNaN(s))) * 0.9 : 0,
+                            suggestedMax: temSaldo ? Math.max(...saldos.filter(s => s !== null && !isNaN(s))) * 1.1 : 10
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Movimentação (Qtd)' },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            beginAtZero: true
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    animations: {
+                        tension: {
+                            duration: 1000,
+                            easing: 'linear'
+                        }
+                    }
+                }
+            });
         }
 
         // Mostrar/ocultar campo de empresas baseado no perfil
@@ -3942,7 +4562,7 @@
 
                 html += `<tr>
                     <td>${item.codigo_sku || '-'}</td>
-                    <td>${item.nome}</td>
+                    <td><a href="#" onclick="abrirDetalhesMaterial(${item.id}); return false;" style="font-weight: bold; color: #2563eb; text-decoration: none;">${item.nome}</a></td>
                     <td>${item.categoria_nome || '-'}</td>
                     <td>${item.empresa_nome || '-'}</td>
                     <td style="text-align: right; font-weight: bold;">${estoque}</td>
@@ -3950,6 +4570,7 @@
                     <td>${status}</td>
                     <td>
                         <button class="btn btn-secondary btn-sm" onclick="editarMaterial(${item.id})" style="padding: 2px 6px; font-size: 11px;" title="Editar Material">✏️</button>
+                        <button class="btn btn-info btn-sm" onclick="abrirDetalhesMaterial(${item.id})" style="padding: 2px 6px; font-size: 11px; margin-left: 5px;" title="Ver Detalhes">📋</button>
                     </td>
                 </tr>`;
             });
@@ -4127,6 +4748,12 @@
                     <input type="number" id="edit-ent-qtd" step="0.01">
                 </div>
                 <div class="form-group">
+                    <label for="edit-ent-local">Local de Armazenamento</label>
+                    <select id="edit-ent-local" required>
+                        <option value="">Selecione um local</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Nota Fiscal</label>
                     <input type="text" id="edit-ent-nf">
                 </div>
@@ -4172,7 +4799,7 @@
     </div>
 
     <script>
-        function editarMovimentacao(id, tipo, material, qtd, nf, obs) {
+        function editarMovimentacao(id, tipo, material, qtd, nf, obs, localId = null) {
             // Decodificar strings que podem ter aspas
             material = material.replace(/\\'/g, "'");
             obs = obs ? obs.replace(/\\'/g, "'") : '';
@@ -4184,6 +4811,16 @@
                 document.getElementById('edit-ent-qtd').value = qtd;
                 document.getElementById('edit-ent-nf').value = nf || '';
                 document.getElementById('edit-ent-obs').value = obs || '';
+                
+                // Preencher select de locais (clonando do cadastro de entrada ou recarregando)
+                const selectLocalOrigem = document.getElementById('ent-local');
+                const selectLocalDestino = document.getElementById('edit-ent-local');
+                
+                if (selectLocalOrigem && selectLocalDestino) {
+                    selectLocalDestino.innerHTML = selectLocalOrigem.innerHTML;
+                    if (localId) selectLocalDestino.value = localId;
+                }
+                
                 document.getElementById('modal-editar-entrada').style.display = 'flex';
             } else if (tipo === 'Saída') {
                 document.getElementById('edit-sai-id').value = id;
@@ -4199,13 +4836,14 @@
             const qtd = document.getElementById('edit-ent-qtd').value;
             const nf = document.getElementById('edit-ent-nf').value;
             const obs = document.getElementById('edit-ent-obs').value;
+            const localId = document.getElementById('edit-ent-local').value;
 
             if (!qtd || qtd <= 0) {
                 exibirNotificacaoSistema('Quantidade inválida', 'warning');
                 return;
             }
 
-            const dados = { id: id, quantidade: qtd, nota_fiscal: nf, observacao: obs };
+            const dados = { id: id, quantidade: qtd, nota_fiscal: nf, observacao: obs, local_destino_id: localId };
             const resultado = await chamarAPI('entrada', 'atualizar', dados);
 
             if (resultado.sucesso) {
@@ -4239,5 +4877,62 @@
             }
         }
     </script>
+    <!-- MODAL: DETALHES DO MATERIAL -->
+    <div id="modal-detalhes-material" class="modal">
+        <div class="modal-content" style="width: 800px; max-width: 95%;">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <h2>Detalhes do Material</h2>
+                    <button class="btn btn-primary btn-sm" onclick="gerarRelatorioPDFMaterial()" title="Baixar PDF">
+                        <i class="fas fa-file-pdf"></i> Gerar PDF
+                    </button>
+                </div>
+                <span class="close" onclick="fecharModalDetalhesMaterial()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                    <div id="detalhe-info-basica" style="flex: 1; background: #f8fafc; padding: 15px; border-radius: 8px;">
+                        <!-- Preenchido via JS -->
+                    </div>
+                    <div id="detalhe-info-estoque" style="flex: 1; background: #f0f9ff; padding: 15px; border-radius: 8px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                        <!-- Preenchido via JS -->
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0; font-size: 1.1rem;">Histórico de Movimentação</h3>
+                        <select id="filtro-dias-grafico" onchange="atualizarGraficoMaterial()" style="padding: 5px; border-radius: 4px; border: 1px solid #cbd5e1;">
+                            <option value="7">Últimos 7 dias</option>
+                            <option value="15">Últimos 15 dias</option>
+                            <option value="30" selected>Últimos 30 dias</option>
+                            <option value="60">Últimos 60 dias</option>
+                            <option value="90">Últimos 90 dias</option>
+                        </select>
+                    </div>
+                    <div style="height: 300px;">
+                        <canvas id="graficoMaterial"></canvas>
+                    </div>
+                </div>
+
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Tipo</th>
+                                <th>Quantidade</th>
+                                <th>Saldo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-detalhe-movimentacoes">
+                            <!-- Preenchido via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

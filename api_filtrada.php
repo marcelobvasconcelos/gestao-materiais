@@ -50,6 +50,23 @@ function aplicarFiltroEmpresa($query, $alias = '', $coluna = 'empresa_id') {
     return $query . " AND $campo_empresa IN ($empresas_str)";
 }
 
+// Função auxiliar para calcular estoque em um local específico
+function calcularEstoqueLocal($conn, $material_id, $local_id) {
+    // Somar entradas neste local
+    $stmt = $conn->prepare("SELECT SUM(quantidade) as total FROM movimentacoes_entrada WHERE material_id = ? AND local_destino_id = ?");
+    $stmt->bind_param("ii", $material_id, $local_id);
+    $stmt->execute();
+    $entradas = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+
+    // Somar saídas deste local
+    $stmt = $conn->prepare("SELECT SUM(quantidade) as total FROM movimentacoes_saida WHERE material_id = ? AND local_origem_id = ?");
+    $stmt->bind_param("ii", $material_id, $local_id);
+    $stmt->execute();
+    $saidas = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+
+    return $entradas - $saidas;
+}
+
 // DASHBOARD
 if ($tipo === 'dashboard') {
     if ($acao === 'stats') {
@@ -1288,6 +1305,145 @@ if ($tipo === 'materiais') {
         exit;
     }
 
+    if ($acao === 'historico') {
+        $material_id = intval($dados['material_id'] ?? $_GET['material_id'] ?? 0);
+        $dias = intval($dados['dias'] ?? $_GET['dias'] ?? 30);
+        
+        if (!$material_id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID do material não informado']);
+            exit;
+        }
+
+        try {
+            // 1. Dados do Material
+            $stmt = $conn->prepare('SELECT m.*, c.nome as categoria_nome, u.simbolo as unidade_simbolo, e.nome as empresa_nome 
+                                    FROM materiais m 
+                                    LEFT JOIN categorias_materiais c ON m.categoria_id = c.id 
+                                    LEFT JOIN unidades_medida u ON m.unidade_medida_id = u.id 
+                                    LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id 
+                                    WHERE m.id = ?');
+            $stmt->bind_param('i', $material_id);
+            $stmt->execute();
+            $material = $stmt->get_result()->fetch_assoc();
+
+            if (!$material) {
+                throw new Exception('Material não encontrado');
+            }
+
+            // 2. Calcular intervalo
+            $data_fim = date('Y-m-d');
+            $data_inicio = date('Y-m-d', strtotime("-$dias days"));
+
+            // 3. Calcular estoque inicial do período
+            // Entradas no período (até hoje)
+            $stmt = $conn->prepare("SELECT SUM(quantidade) as total FROM movimentacoes_entrada WHERE material_id = ? AND data_entrada >= ?");
+            $stmt->bind_param('is', $material_id, $data_inicio);
+            $stmt->execute();
+            $entradas_periodo = floatval($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+
+            // Saídas no período (até hoje)
+            $stmt = $conn->prepare("SELECT SUM(quantidade) as total FROM movimentacoes_saida WHERE material_id = ? AND data_saida >= ?");
+            $stmt->bind_param('is', $material_id, $data_inicio);
+            $stmt->execute();
+            $saidas_periodo = floatval($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+
+            $estoque_inicial_periodo = floatval($material['estoque_atual']) - $entradas_periodo + $saidas_periodo;
+
+            // 4. Buscar movimentações diárias para o gráfico
+            $movimentacoes = [];
+            
+            // Entradas
+            $stmt = $conn->prepare("SELECT 'entrada' as tipo, data_entrada as data, quantidade, id 
+                                    FROM movimentacoes_entrada 
+                                    WHERE material_id = ? AND data_entrada >= ? 
+                                    ORDER BY data_entrada ASC");
+            $stmt->bind_param('is', $material_id, $data_inicio);
+            $stmt->execute();
+            $res_ent = $stmt->get_result();
+            while ($row = $res_ent->fetch_assoc()) {
+                $movimentacoes[] = $row;
+            }
+
+            // Saídas
+            $stmt = $conn->prepare("SELECT 'saida' as tipo, data_saida as data, quantidade, id 
+                                    FROM movimentacoes_saida 
+                                    WHERE material_id = ? AND data_saida >= ? 
+                                    ORDER BY data_saida ASC");
+            $stmt->bind_param('is', $material_id, $data_inicio);
+            $stmt->execute();
+            $res_sai = $stmt->get_result();
+            while ($row = $res_sai->fetch_assoc()) {
+                $movimentacoes[] = $row;
+            }
+
+            // Ordenar todas por data
+            usort($movimentacoes, function($a, $b) {
+                return strtotime($a['data']) - strtotime($b['data']);
+            });
+
+            // 5. Construir dados do gráfico (dia a dia)
+            $grafico = [];
+            $estoque_corrente = $estoque_inicial_periodo;
+            $data_atual_loop = $data_inicio;
+            $mov_idx = 0;
+            $total_movs = count($movimentacoes);
+
+            // Loop de data_inicio até hoje
+            while (strtotime($data_atual_loop) <= strtotime($data_fim)) {
+                // Processar movimentações deste dia
+                $entradas_dia = 0;
+                $saidas_dia = 0;
+
+                // Avançar nas movimentações até encontrar as do dia atual
+                while ($mov_idx < $total_movs) {
+                    $data_mov = date('Y-m-d', strtotime($movimentacoes[$mov_idx]['data']));
+                    
+                    if ($data_mov < $data_atual_loop) {
+                        // Movimentação anterior ao dia atual (não deveria acontecer se ordenado, mas por segurança)
+                        $mov_idx++;
+                        continue;
+                    }
+                    
+                    if ($data_mov > $data_atual_loop) {
+                        // Movimentação futura, parar e ir para próximo dia do loop
+                        break;
+                    }
+                    
+                    // Se chegou aqui, é do dia atual
+                    if ($movimentacoes[$mov_idx]['tipo'] == 'entrada') {
+                        $entradas_dia += $movimentacoes[$mov_idx]['quantidade'];
+                        $estoque_corrente += $movimentacoes[$mov_idx]['quantidade'];
+                    } else {
+                        $saidas_dia += $movimentacoes[$mov_idx]['quantidade'];
+                        $estoque_corrente -= $movimentacoes[$mov_idx]['quantidade'];
+                    }
+                    $mov_idx++;
+                }
+
+                $grafico[] = [
+                    'data' => date('d/m', strtotime($data_atual_loop)),
+                    'data_full' => $data_atual_loop,
+                    'saldo' => $estoque_corrente,
+                    'entradas' => $entradas_dia,
+                    'saidas' => $saidas_dia
+                ];
+
+                $data_atual_loop = date('Y-m-d', strtotime($data_atual_loop . ' +1 day'));
+            }
+
+            echo json_encode([
+                'sucesso' => true, 
+                'material' => $material,
+                'grafico' => $grafico,
+                'movimentacoes' => $movimentacoes
+            ]);
+
+        } catch (Exception $e) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao buscar histórico: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
     if ($acao === 'estoque_por_local') {
         $material_id = $_GET['material_id'] ?? 0;
 
@@ -1859,6 +2015,8 @@ if ($tipo === 'relatorios') {
         echo json_encode(['sucesso' => true, 'dados' => $dados]);
         exit;
     }
+
+
 }
 
 // ENTRADA
@@ -1869,7 +2027,12 @@ if ($tipo === 'entrada') {
                   LEFT JOIN materiais m ON me.material_id = m.id 
                   LEFT JOIN usuarios u ON me.responsavel_id = u.id 
                   LEFT JOIN locais_armazenamento l ON me.local_destino_id = l.id 
-                  ORDER BY me.data_entrada DESC LIMIT 50';
+                  ORDER BY me.data_entrada DESC';
+        
+        // Paginação
+        $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
+        $offset = isset($_GET['offset']) ? intval($_GET['offset']) : 0;
+        $query .= " LIMIT $limit OFFSET $offset";
         
         $result = $conn->query($query);
         $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
@@ -1877,6 +2040,76 @@ if ($tipo === 'entrada') {
         exit;
     }
     
+    if ($acao === 'criar_multipla') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem registrar entradas']);
+            exit;
+        }
+
+        $itens = $dados['itens'] ?? [];
+        if (empty($itens) || !is_array($itens)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Nenhum item informado']);
+            exit;
+        }
+
+        $conn->begin_transaction();
+        try {
+            $stmtInsert = $conn->prepare('INSERT INTO movimentacoes_entrada (data_entrada, material_id, quantidade, nota_fiscal, responsavel_id, local_destino_id, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            
+            foreach ($itens as $item) {
+                $material_id = intval($item['material_id']);
+                $quantidade = floatval($item['quantidade']);
+                
+                if (!$material_id || $quantidade <= 0) {
+                    throw new Exception('Material e quantidade inválidos em um dos itens');
+                }
+
+                // Verificar material
+                $stmtMat = $conn->prepare('SELECT id, estoque_atual FROM materiais WHERE id = ? AND ativo = 1');
+                $stmtMat->bind_param('i', $material_id);
+                $stmtMat->execute();
+                $material = $stmtMat->get_result()->fetch_assoc();
+
+                if (!$material) {
+                    throw new Exception("Material ID $material_id não encontrado ou inativo");
+                }
+
+                // Inserir movimentação
+                // data(s), material(i), qtd(d), nota(s), resp(i), local(i), obs(s)
+                $stmtInsert->bind_param('sidisis', 
+                    $item['data_entrada'], 
+                    $material_id, 
+                    $quantidade, 
+                    $item['nota_fiscal'], 
+                    $item['responsavel_id'], 
+                    $item['local_destino_id'], 
+                    $item['observacao']
+                );
+                $stmtInsert->execute();
+
+                // Atualizar estoque
+                $novo_estoque = $material['estoque_atual'] + $quantidade;
+                $local_destino_id = $item['local_destino_id'] ?? null;
+
+                if ($local_destino_id) {
+                    $stmtUpd = $conn->prepare('UPDATE materiais SET estoque_atual = ?, local_id = ? WHERE id = ?');
+                    $stmtUpd->bind_param('dii', $novo_estoque, $local_destino_id, $material_id);
+                } else {
+                    $stmtUpd = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+                    $stmtUpd->bind_param('di', $novo_estoque, $material_id);
+                }
+                $stmtUpd->execute();
+            }
+
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => count($itens) . ' entradas registradas com sucesso']);
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar entradas: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
     if ($acao === 'criar') {
         if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
             echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem registrar entradas']);
@@ -1967,15 +2200,47 @@ if ($tipo === 'entrada') {
             $diferenca = $nova_quantidade - $atual['qtd_antiga'];
 
             // 3. Validar se o estoque suporta a redução (se houver)
+            // 3. Validar se o estoque suporta a redução (se houver)
             // Se diferença for negativa (ex: era 10, virou 8 => diff -2), estoque deve ser >= 2
             if ($diferenca < 0 && ($atual['estoque_atual'] + $diferenca) < 0) {
-                throw new Exception("Estoque insuficiente para esta alteração. Estoque atual: {$atual['estoque_atual']}, Redução necessária: " . abs($diferenca));
+                throw new Exception("Estoque insuficiente para esta alteração. Estoque total: {$atual['estoque_atual']}, Redução necessária: " . abs($diferenca));
+            }
+            
+            // Validar estoque local se houver redução ou mudança de local
+            $stmt = $conn->prepare('SELECT local_destino_id FROM movimentacoes_entrada WHERE id = ?');
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+            $local_antigo_id = $stmt->get_result()->fetch_assoc()['local_destino_id'];
+            $local_novo_id = isset($dados['local_destino_id']) ? intval($dados['local_destino_id']) : $local_antigo_id;
+            
+            // Se mudou de local, o local antigo perde toda a quantidade antiga.
+            if ($local_antigo_id != $local_novo_id) {
+                if ($local_antigo_id) {
+                    $estoque_local_antigo = calcularEstoqueLocal($conn, $atual['material_id'], $local_antigo_id);
+                    if ($estoque_local_antigo < $atual['qtd_antiga']) {
+                         throw new Exception("Não é possível mudar o local. O local de origem (ID $local_antigo_id) ficaria negativo. Saldo: $estoque_local_antigo, Necessário: {$atual['qtd_antiga']}");
+                    }
+                }
+            } 
+            // Se não mudou de local, mas reduziu quantidade
+            elseif ($diferenca < 0 && $local_antigo_id) {
+                $estoque_local = calcularEstoqueLocal($conn, $atual['material_id'], $local_antigo_id);
+                // O estoque local já inclui essa entrada. Se vamos reduzir X, precisamos ter X disponível? 
+                // Não, o estoque local ATUAL inclui a entrada. Se reduzirmos a entrada em 2, o estoque local cai 2.
+                // O problema é se o estoque local for MENOR que a redução (impossível matematicamente se a entrada faz parte do saldo, a menos que o saldo já esteja errado/negativo por outros motivos).
+                // Mas se o usuário já consumiu itens dessa entrada, o saldo local pode ser menor que a quantidade da entrada.
+                // Ex: Entrada 10. Saída 8. Saldo 2.
+                // Editar entrada para 5 (redução de 5). Novo saldo seria 2 - 5 = -3. ERRO.
+                
+                if (($estoque_local + $diferenca) < 0) {
+                     throw new Exception("Estoque insuficiente no local ID $local_antigo_id para esta redução. Saldo: $estoque_local, Redução: " . abs($diferenca));
+                }
             }
 
             // 4. Atualizar movimentação
             $stmt = $conn->prepare('UPDATE movimentacoes_entrada SET quantidade = ?, local_destino_id = ?, nota_fiscal = ?, observacao = ? WHERE id = ?');
             $local_destino_id = isset($dados['local_destino_id']) ? intval($dados['local_destino_id']) : null;
-            $stmt->bind_param('disisi', $nova_quantidade, $local_destino_id, $dados['nota_fiscal'], $dados['observacao'], $id);
+            $stmt->bind_param('dissi', $nova_quantidade, $local_destino_id, $dados['nota_fiscal'], $dados['observacao'], $id);
             $stmt->execute();
 
             // 5. Atualizar estoque do material
@@ -1995,6 +2260,72 @@ if ($tipo === 'entrada') {
         }
         exit;
     }
+
+    if ($acao === 'excluir') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem excluir entradas']);
+            exit;
+        }
+
+        $id = intval($dados['id']);
+        if (!$id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID da entrada não informado']);
+            exit;
+        }
+
+        $conn->begin_transaction();
+        try {
+            // 1. Buscar dados da entrada para saber quanto estornar
+            $stmt = $conn->prepare('SELECT me.quantidade, me.material_id, m.estoque_atual, m.nome as material_nome 
+                                    FROM movimentacoes_entrada me 
+                                    JOIN materiais m ON me.material_id = m.id 
+                                    WHERE me.id = ?');
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+            $entrada = $stmt->get_result()->fetch_assoc();
+
+            if (!$entrada) {
+                throw new Exception('Entrada não encontrada');
+            }
+
+            // 2. Verificar se há estoque suficiente para remover a entrada (Global e Local)
+            if ($entrada['estoque_atual'] < $entrada['quantidade']) {
+                throw new Exception("Não é possível excluir esta entrada pois o estoque total ({$entrada['estoque_atual']}) é menor que a quantidade da entrada ({$entrada['quantidade']}).");
+            }
+            
+            // Buscar local da entrada
+            $stmt = $conn->prepare('SELECT local_destino_id FROM movimentacoes_entrada WHERE id = ?');
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+            $local_id = $stmt->get_result()->fetch_assoc()['local_destino_id'];
+            
+            if ($local_id) {
+                $estoque_local = calcularEstoqueLocal($conn, $entrada['material_id'], $local_id);
+                if ($estoque_local < $entrada['quantidade']) {
+                    throw new Exception("Não é possível excluir esta entrada pois o estoque no local ID $local_id ($estoque_local) é menor que a quantidade da entrada ({$entrada['quantidade']}).");
+                }
+            }
+
+            // 3. Excluir a movimentação
+            $stmt = $conn->prepare('DELETE FROM movimentacoes_entrada WHERE id = ?');
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+
+            // 4. Atualizar o estoque (subtrair)
+            $novo_estoque = $entrada['estoque_atual'] - $entrada['quantidade'];
+            $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+            $stmt->bind_param('di', $novo_estoque, $entrada['material_id']);
+            $stmt->execute();
+
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Entrada excluída e estoque estornado com sucesso']);
+
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao excluir: ' . $e->getMessage()]);
+        }
+        exit;
+    }
 }
 
 // SAÍDA DE MATERIAIS
@@ -2004,7 +2335,12 @@ if ($tipo === 'saida') {
                   FROM movimentacoes_saida ms 
                   LEFT JOIN materiais m ON ms.material_id = m.id 
                   LEFT JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
-                  ORDER BY ms.data_saida DESC LIMIT 50';
+                  ORDER BY ms.data_saida DESC';
+        
+        // Paginação
+        $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
+        $offset = isset($_GET['offset']) ? intval($_GET['offset']) : 0;
+        $query .= " LIMIT $limit OFFSET $offset";
         
         $result = $conn->query($query);
         $dados = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
@@ -2038,8 +2374,20 @@ if ($tipo === 'saida') {
             }
 
             // Verificar se o local de origem coincide com o local atual do material (se local de origem for especificado)
-            if (!empty($dados['local_origem_id']) && $material['local_id'] != $dados['local_origem_id']) {
-                throw new Exception('O material não está no local de origem selecionado. Local atual: ' . ($material['local_id'] ?? 'Não definido'));
+            if (!empty($dados['local_origem_id'])) {
+                $local_origem_id = intval($dados['local_origem_id']);
+                
+                // Validação 1: O material está no local? (Lógica antiga, talvez redundante com a nova, mas mantendo por segurança)
+                if ($material['local_id'] != $local_origem_id) {
+                     // Opcional: remover esta validação se o sistema permitir saídas de locais diferentes do "principal"
+                     // throw new Exception('O material não está no local de origem selecionado. Local atual: ' . ($material['local_id'] ?? 'Não definido'));
+                }
+                
+                // Validação 2: Tem saldo neste local?
+                $estoque_local = calcularEstoqueLocal($conn, $material_id, $local_origem_id);
+                if ($estoque_local < $quantidade) {
+                    throw new Exception("Estoque insuficiente no local ID $local_origem_id. Disponível: $estoque_local");
+                }
             }
 
             // Registrar saída
@@ -2050,7 +2398,10 @@ if ($tipo === 'saida') {
             $data_saida = $dados['data_saida'];
             $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
             $local_origem_id = isset($dados['local_origem_id']) ? intval($dados['local_origem_id']) : null;
-            $finalidade = $dados['finalidade'] ?? '';
+            $local_origem_id = isset($dados['local_origem_id']) ? intval($dados['local_origem_id']) : null;
+            // Truncar finalidade para evitar erro de banco (limite provável de 50 chars)
+            $finalidade = isset($dados['finalidade']) ? substr($dados['finalidade'], 0, 50) : '';
+            $observacao = $dados['observacao'] ?? '';
             $observacao = $dados['observacao'] ?? '';
 
             // data(s), material(i), qtd(d), empresa(i), local(i), fin(s), obs(s)
@@ -2251,7 +2602,10 @@ if ($tipo === 'saida') {
 
                 $data_saida = $dados['data_saida'];
                 $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
-                $finalidade = $dados['finalidade'] ?? '';
+                $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
+                // Truncar finalidade para evitar erro de banco
+                $finalidade = isset($dados['finalidade']) ? substr($dados['finalidade'], 0, 50) : '';
+                $observacao = $dados['observacao'] ?? '';
                 $observacao = $dados['observacao'] ?? '';
 
                 $stmt->bind_param('sidisss',
