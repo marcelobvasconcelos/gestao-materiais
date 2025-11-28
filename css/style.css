@@ -442,6 +442,7 @@ textarea:focus {
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
     overflow: hidden;
     animation: slideUp 0.3s ease-out;
+    border: 1px solid var(--border-color);
 }
 
 .modal-header {
@@ -453,6 +454,21 @@ textarea:focus {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.modal-body {
+    padding: 30px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.modal-footer {
+    padding: 20px 30px;
+    border-top: 1px solid var(--border-color);
+    background-color: #f8fafc;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
 }
 
 @keyframes fadeIn {

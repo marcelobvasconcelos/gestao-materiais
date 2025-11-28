@@ -238,13 +238,45 @@
                     </div>
                 </div>
 
+                <!-- TABELA: ESTOQUE DETALHADO -->
+                <div class="table-container" style="margin-top: 30px;">
+                    <div class="table-header" onclick="toggleEstoqueDetalhado()" style="cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between;">
+                        <h2 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                            Estoque Detalhado
+                            <i id="icon-toggle-estoque" class="fas fa-chevron-down" style="font-size: 0.8em; transition: transform 0.3s;"></i>
+                        </h2>
+                    </div>
+                    <div id="container-tabela-estoque" class="table-responsive" style="display: none; transition: all 0.3s ease-in-out;">
+                        <table class="table-hover" id="tabela-estoque-dashboard">
+                            <thead>
+                                <tr>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('codigo_sku')" style="cursor: pointer;">SKU <i class="fas fa-sort"></i></th>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('nome')" style="cursor: pointer;">Material <i class="fas fa-sort"></i></th>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('categoria_nome')" style="cursor: pointer;">Categoria <i class="fas fa-sort"></i></th>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('empresa_nome')" style="cursor: pointer;">Empresa <i class="fas fa-sort"></i></th>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('estoque_atual')" style="cursor: pointer; text-align: right;">Qtd. <i class="fas fa-sort"></i></th>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('unidade_simbolo')" style="cursor: pointer;">Unid. <i class="fas fa-sort"></i></th>
+                                    <th onclick="event.stopPropagation(); ordenarTabelaEstoque('status')" style="cursor: pointer;">Status <i class="fas fa-sort"></i></th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-estoque-dashboard">
+                                <!-- Dados via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- TABELA: ÚLTIMAS MOVIMENTAÇÕES -->
                 <div class="table-container">
-                    <div class="table-header">
-                        <h2>Últimas Movimentações</h2>
-                        <button class="btn btn-primary btn-sm" onclick="mostrarSecao('relatorios')">Ver Completo</button>
+                    <div class="table-header" onclick="toggleUltimasMovimentacoes()" style="cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between;">
+                        <h2 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                            Últimas Movimentações 
+                            <i id="icon-toggle-movimentacoes" class="fas fa-chevron-down" style="font-size: 0.8em; transition: transform 0.3s;"></i>
+                        </h2>
+                        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); mostrarSecao('relatorios')">Ver Completo</button>
                     </div>
-                    <div class="table-responsive">
+                    <div id="container-tabela-movimentacoes" class="table-responsive" style="display: none; transition: all 0.3s ease-in-out;">
                         <table class="table-hover">
                             <thead>
                                 <tr>
@@ -397,9 +429,7 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Local de Armazenagem</label>
-                            <select id="mat-local"></select>
-                        </div>
+
                         <div class="form-group">
                             <label>Unidade de Medida</label>
                             <select id="mat-unidade">
@@ -873,6 +903,10 @@
                     </div>
                 </div>
 
+
+
+
+
                 <!-- MODAL DE EDIÇÃO -->
                 <div id="modal-editar-usuario" class="modal">
                     <div class="modal-content" style="max-width: 800px;">
@@ -986,7 +1020,67 @@
         </div>
     </div>
 
-    <!-- Modal removido para ser gerado dinamicamente pelo JS -->
+    <!-- MODAL: EDITAR MATERIAL -->
+    <div id="modal-editar-material" class="modal">
+        <div class="modal-content" style="width: 800px; max-width: 90%;">
+            <div class="modal-header">
+                <h2>Editar Material</h2>
+                <span class="close" onclick="fecharModal('modal-editar-material')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-mat-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Nome do Material</label>
+                        <input type="text" id="edit-mat-nome">
+                    </div>
+                    <div class="form-group">
+                        <label>Código SKU</label>
+                        <input type="text" id="edit-mat-sku" readonly style="background-color: #f0f0f0; cursor: not-allowed;">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        <select id="edit-mat-categoria"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Empresa Responsável</label>
+                        <select id="edit-mat-empresa"></select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Unidade de Medida</label>
+                        <select id="edit-mat-unidade">
+                            <option value="1">Unidade</option>
+                            <option value="2">Litro</option>
+                            <option value="3">Kg</option>
+                            <option value="4">Caixa</option>
+                            <option value="5">Pacote</option>
+                            <option value="6">Resma</option>
+                            <option value="7">Rolo</option>
+                            <option value="8">Lata</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ponto de Reposição</label>
+                        <input type="number" id="edit-mat-reposicao">
+                    </div>
+                    <div class="form-group">
+                        <label>Estoque Máximo</label>
+                        <input type="number" id="edit-mat-maximo">
+                    </div>
+                </div>
+                <div class="form-actions" style="margin-top: 20px; text-align: right;">
+                    <button class="btn btn-secondary" onclick="fecharModal('modal-editar-material')">Cancelar</button>
+                    <button class="btn btn-primary" onclick="salvarEdicaoMaterial()">Salvar Alterações</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         // =====================================================================
@@ -1153,6 +1247,9 @@
                 
                 // 3. CARREGAR ÚLTIMAS MOVIMENTAÇÕES
                 await carregarUltimasMovimentacoes();
+
+                // 4. CARREGAR ESTOQUE DETALHADO
+                await carregarTabelaEstoqueDashboard();
                 
             } catch (error) {
                 console.error('Erro ao carregar dashboard:', error);
@@ -1845,7 +1942,7 @@
                     filtroSelect.innerHTML = html;
                 }
             } else {
-                // Gestor/Operador: usar empresas vinculadas do login
+                // Gestor/Operador: usar empresas vinculadas
                 const empresasVinculadas = usuarioLogado.empresas_vinculadas || [];
                 
                 if (empresasVinculadas.length == 1) {
@@ -1889,7 +1986,7 @@
                             <td>${mat.empresa_nome || ''}</td>
                             <td>
                                 <button class="btn btn-info btn-sm" onclick="verEstoquePorLocal(${mat.id}, '${nomeEscaped}')" style="margin-right: 5px; padding: 5px 10px; font-size: 12px; background-color: #0ea5e9; color: white; border: none;">📍 Locais</button>
-                                <button class="btn btn-secondary btn-sm" onclick="editarMaterialGeral(${mat.id})" style="margin-right: 5px; padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
+                                <button class="btn btn-secondary btn-sm" onclick="editarMaterial(${mat.id})" style="margin-right: 5px; padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
                                 <button class="btn btn-danger btn-sm" onclick="excluirMaterialGeral(${mat.id}, '${nomeEscaped}', ${mat.estoque_atual || 0})" style="padding: 5px 10px; font-size: 12px;">🗑️ Excluir</button>
                             </td>
                         </tr>`;
@@ -1937,7 +2034,7 @@
                 categoria_id: parseInt(categoria),
                 unidade_medida_id: parseInt(document.getElementById('mat-unidade').value),
                 empresa_id: parseInt(empresa),
-                local_id: parseInt(document.getElementById('mat-local').value) || null, // Permitir nulo no cadastro
+                local_id: null, // Local removido do cadastro inicial
                 ponto_reposicao: parseFloat(document.getElementById('mat-reposicao').value) || 0,
                 estoque_maximo: parseFloat(document.getElementById('mat-maximo').value) || 0
             };
@@ -1958,10 +2055,7 @@
             }
         }
 
-        async function editarMaterialGeral(id) {
-            exibirNotificacaoSistema('Função de edição em desenvolvimento. Material ID: ' + id, 'warning');
-            // TODO: Implementar modal de edição de material
-        }
+
 
         async function excluirMaterialGeral(id, nome, estoque) {
             if (estoque > 0) {
@@ -2273,7 +2367,7 @@
                 let html = '<table><thead><tr><th>Data</th><th>Material</th><th>Quantidade</th><th>Empresa</th><th>Finalidade/Observação</th></tr></thead><tbody>';
                 resultado.dados.forEach(sai => {
                     html += `<tr>
-                        <td>${formatarData(sai.data_saida)}</td>
+                        <td>${formatarData(sai.data)}</td>
                         <td>${sai.material_nome}</td>
                         <td>${sai.quantidade}</td>
                         <td>${sai.empresa_nome || '-'}</td>
@@ -3032,9 +3126,15 @@
                     </tr>`;
                 });
             } else if (tipo === 'movimentacoes') {
-                html += '<th>Data</th><th>Tipo</th><th>Material</th><th>Empresa</th><th>Qtd</th><th>Responsável</th></tr></thead><tbody>';
+                html += '<th>Data</th><th>Tipo</th><th>Material</th><th>Empresa</th><th>Qtd</th><th>Responsável</th><th>Ações</th></tr></thead><tbody>';
                 dados.forEach(d => {
                     const classeTipo = d.tipo === 'Entrada' ? 'status-adequado' : 'status-critico'; // Verde para entrada, vermelho para saída
+                    
+                    // Preparar dados para edição (escapar aspas)
+                    const materialEscaped = d.material ? d.material.replace(/'/g, "\\'") : '';
+                    const nfEscaped = d.nota_fiscal ? d.nota_fiscal.replace(/'/g, "\\'") : '';
+                    const obsEscaped = d.observacao ? d.observacao.replace(/'/g, "\\'") : '';
+                    
                     html += `<tr>
                         <td>${formatarData(d.data)}</td>
                         <td><span class="${classeTipo}">${d.tipo}</span></td>
@@ -3042,6 +3142,11 @@
                         <td>${d.empresa || '-'}</td>
                         <td>${d.quantidade}</td>
                         <td>${d.responsavel || '-'}</td>
+                        <td>
+                            <button class="btn btn-secondary btn-sm" onclick="editarMovimentacao(${d.id}, '${d.tipo}', '${materialEscaped}', ${d.quantidade}, '${nfEscaped}', '${obsEscaped}')" title="Editar" style="padding: 2px 6px;">
+                                ✏️
+                            </button>
+                        </td>
                     </tr>`;
                 });
             } else if (tipo === 'consumo') {
@@ -3757,6 +3862,380 @@
             } catch (e) {
                 console.error(e);
                 tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 20px; color: red;">Erro ao carregar estoque.</td></tr>';
+            }
+        }
+
+        function toggleUltimasMovimentacoes() {
+            const container = document.getElementById('container-tabela-movimentacoes');
+            const icon = document.getElementById('icon-toggle-movimentacoes');
+            
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                icon.classList.remove('fa-chevron-down');
+                icon.classList.add('fa-chevron-up');
+            } else {
+                container.style.display = 'none';
+                icon.classList.remove('fa-chevron-up');
+                icon.classList.add('fa-chevron-down');
+            }
+        }
+
+        // Variáveis globais para controle da tabela de estoque
+        let dadosEstoqueDashboard = [];
+        let ordemAtualEstoque = { coluna: 'nome', direcao: 'asc' };
+
+        async function carregarTabelaEstoqueDashboard() {
+            const tbody = document.getElementById('tbody-estoque-dashboard');
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Carregando...</td></tr>';
+
+            try {
+                const resultado = await chamarAPI('materiais', 'listar', null, 'somente_com_estoque=true');
+                
+                if (resultado.sucesso && resultado.dados) {
+                    dadosEstoqueDashboard = resultado.dados;
+                    renderizarTabelaEstoque();
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Nenhum material com estoque encontrado.</td></tr>';
+                }
+            } catch (e) {
+                console.error(e);
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: red;">Erro ao carregar dados.</td></tr>';
+            }
+        }
+
+        function renderizarTabelaEstoque() {
+            const tbody = document.getElementById('tbody-estoque-dashboard');
+            
+            // Ordenar dados
+            dadosEstoqueDashboard.sort((a, b) => {
+                let valA = a[ordemAtualEstoque.coluna];
+                let valB = b[ordemAtualEstoque.coluna];
+
+                // Tratar números
+                if (ordemAtualEstoque.coluna === 'estoque_atual') {
+                    valA = parseFloat(valA);
+                    valB = parseFloat(valB);
+                } else {
+                    // Tratar strings (case insensitive)
+                    valA = (valA || '').toString().toLowerCase();
+                    valB = (valB || '').toString().toLowerCase();
+                }
+
+                if (valA < valB) return ordemAtualEstoque.direcao === 'asc' ? -1 : 1;
+                if (valA > valB) return ordemAtualEstoque.direcao === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            let html = '';
+            dadosEstoqueDashboard.forEach(item => {
+                // Definir status
+                let status = '<span class="badge badge-success">OK</span>';
+                const estoque = parseFloat(item.estoque_atual);
+                const minimo = parseFloat(item.ponto_reposicao);
+                const maximo = parseFloat(item.estoque_maximo);
+
+                if (estoque <= minimo) {
+                    status = '<span class="badge badge-danger">Baixo</span>';
+                } else if (maximo > 0 && estoque > maximo) {
+                    status = '<span class="badge badge-warning">Excesso</span>';
+                }
+
+                html += `<tr>
+                    <td>${item.codigo_sku || '-'}</td>
+                    <td>${item.nome}</td>
+                    <td>${item.categoria_nome || '-'}</td>
+                    <td>${item.empresa_nome || '-'}</td>
+                    <td style="text-align: right; font-weight: bold;">${estoque}</td>
+                    <td>${item.unidade_simbolo || '-'}</td>
+                    <td>${status}</td>
+                    <td>
+                        <button class="btn btn-secondary btn-sm" onclick="editarMaterial(${item.id})" style="padding: 2px 6px; font-size: 11px;" title="Editar Material">✏️</button>
+                    </td>
+                </tr>`;
+            });
+
+            if (html === '') {
+                html = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Nenhum material com estoque encontrado.</td></tr>';
+            }
+            
+            tbody.innerHTML = html;
+            atualizarIconesOrdenacao();
+        }
+
+        function ordenarTabelaEstoque(coluna) {
+            if (ordemAtualEstoque.coluna === coluna) {
+                ordemAtualEstoque.direcao = ordemAtualEstoque.direcao === 'asc' ? 'desc' : 'asc';
+            } else {
+                ordemAtualEstoque.coluna = coluna;
+                ordemAtualEstoque.direcao = 'asc';
+            }
+            renderizarTabelaEstoque();
+        }
+
+        function atualizarIconesOrdenacao() {
+            const headers = document.querySelectorAll('#tabela-estoque-dashboard th');
+            headers.forEach(th => {
+                const icon = th.querySelector('i');
+                if (icon) {
+                    icon.className = 'fas fa-sort'; // Reset
+                    if (th.getAttribute('onclick').includes(ordemAtualEstoque.coluna)) {
+                        icon.className = ordemAtualEstoque.direcao === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+                    }
+                }
+            });
+        }
+
+        function toggleEstoqueDetalhado() {
+            const container = document.getElementById('container-tabela-estoque');
+            const icon = document.getElementById('icon-toggle-estoque');
+            
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                icon.classList.remove('fa-chevron-down');
+                icon.classList.add('fa-chevron-up');
+            } else {
+                container.style.display = 'none';
+                icon.classList.remove('fa-chevron-up');
+                icon.classList.add('fa-chevron-down');
+            }
+        }
+
+        // =====================================================================
+        // FUNÇÕES DE EDIÇÃO DE MATERIAL (MOVIDAS PARA FINAL DO ARQUIVO)
+        // =====================================================================
+        
+        function fecharModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        async function editarMaterial(id) {
+            console.log('Abrindo edição para material ID:', id);
+            try {
+                // Carregar dados do material
+                const resultado = await chamarAPI('materiais', 'obter', null, `id=${id}`);
+                
+                if (resultado.sucesso && resultado.dados) {
+                    const mat = resultado.dados;
+                    
+                    // Preencher campos
+                    document.getElementById('edit-mat-id').value = mat.id;
+                    document.getElementById('edit-mat-nome').value = mat.nome;
+                    document.getElementById('edit-mat-sku').value = mat.codigo_sku;
+                    document.getElementById('edit-mat-reposicao').value = mat.ponto_reposicao;
+                    document.getElementById('edit-mat-maximo').value = mat.estoque_maximo;
+                    
+                    // Carregar combos
+                    await carregarCombosEdicao(mat.categoria_id, mat.empresa_id, mat.unidade_medida_id);
+                    
+                    // Abrir modal
+                    document.getElementById('modal-editar-material').style.display = 'flex';
+                } else {
+                    exibirNotificacaoSistema('Erro ao carregar material: ' + (resultado.erro || 'Erro desconhecido'), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                exibirNotificacaoSistema('Erro ao abrir edição: ' + e.message, 'error');
+            }
+        }
+
+        async function carregarCombosEdicao(catId, empId, unidId) {
+            // Categorias
+            const categorias = await chamarAPI('categorias', 'listar');
+            let catHtml = '<option value="">Selecione...</option>';
+            if (categorias.sucesso) {
+                categorias.dados.forEach(c => {
+                    catHtml += `<option value="${c.id}" ${c.id == catId ? 'selected' : ''}>${c.nome}</option>`;
+                });
+            }
+            document.getElementById('edit-mat-categoria').innerHTML = catHtml;
+            
+            // Empresas
+            const empresas = await chamarAPI('empresas', 'listar');
+            let empHtml = '<option value="">Selecione...</option>';
+            if (empresas.sucesso) {
+                empresas.dados.forEach(e => {
+                    empHtml += `<option value="${e.id}" ${e.id == empId ? 'selected' : ''}>${e.nome}</option>`;
+                });
+            }
+            document.getElementById('edit-mat-empresa').innerHTML = empHtml;
+
+            // Unidade de Medida
+            const unidadeSelect = document.getElementById('edit-mat-unidade');
+            if (unidadeSelect) {
+                unidadeSelect.value = unidId;
+            }
+        }
+
+        async function salvarEdicaoMaterial() {
+            const id = document.getElementById('edit-mat-id').value;
+            const nome = document.getElementById('edit-mat-nome').value;
+            const categoria = document.getElementById('edit-mat-categoria').value;
+            const empresa = document.getElementById('edit-mat-empresa').value;
+            const unidade = document.getElementById('edit-mat-unidade').value;
+            const reposicao = document.getElementById('edit-mat-reposicao').value;
+            const maximo = document.getElementById('edit-mat-maximo').value;
+            
+            if (!nome || !categoria || !empresa || !unidade) {
+                exibirNotificacaoSistema('Preencha todos os campos obrigatórios', 'warning');
+                return;
+            }
+            
+            const dados = {
+                id: id,
+                nome: nome,
+                categoria_id: parseInt(categoria),
+                unidade_medida_id: parseInt(unidade),
+                empresa_id: parseInt(empresa),
+                ponto_reposicao: parseFloat(reposicao) || 0,
+                estoque_maximo: parseFloat(maximo) || 0,
+                local_id: null
+            };
+            
+            const resultado = await chamarAPI('materiais', 'atualizar', dados);
+            
+            if (resultado.sucesso) {
+                exibirNotificacaoSistema('Material atualizado com sucesso!', 'success');
+                fecharModal('modal-editar-material');
+                
+                // Atualizar tabelas onde o material pode estar visível
+                if (document.getElementById('materiais').classList.contains('active')) {
+                    filtrarMateriais();
+                }
+                if (document.getElementById('dashboard').classList.contains('active')) {
+                    carregarTabelaEstoqueDashboard();
+                }
+            } else {
+                exibirNotificacaoSistema('Erro ao atualizar: ' + resultado.erro, 'error');
+            }
+        }
+    </script>
+    <!-- MODAL: EDITAR ENTRADA -->
+    <div id="modal-editar-entrada" class="modal">
+        <div class="modal-content" style="width: 500px;">
+            <div class="modal-header">
+                <h2>Editar Entrada</h2>
+                <span class="close" onclick="fecharModal('modal-editar-entrada')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-ent-id">
+                <div class="form-group">
+                    <label>Material</label>
+                    <input type="text" id="edit-ent-material" readonly style="background-color: #f0f0f0;">
+                </div>
+                <div class="form-group">
+                    <label>Quantidade</label>
+                    <input type="number" id="edit-ent-qtd" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Nota Fiscal</label>
+                    <input type="text" id="edit-ent-nf">
+                </div>
+                <div class="form-group">
+                    <label>Observação</label>
+                    <textarea id="edit-ent-obs" rows="3"></textarea>
+                </div>
+                <div class="form-actions" style="margin-top: 20px; text-align: right;">
+                    <button class="btn btn-secondary" onclick="fecharModal('modal-editar-entrada')">Cancelar</button>
+                    <button class="btn btn-primary" onclick="salvarEdicaoEntrada()">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: EDITAR SAÍDA -->
+    <div id="modal-editar-saida" class="modal">
+        <div class="modal-content" style="width: 500px;">
+            <div class="modal-header">
+                <h2>Editar Saída</h2>
+                <span class="close" onclick="fecharModal('modal-editar-saida')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-sai-id">
+                <div class="form-group">
+                    <label>Material</label>
+                    <input type="text" id="edit-sai-material" readonly style="background-color: #f0f0f0;">
+                </div>
+                <div class="form-group">
+                    <label>Quantidade</label>
+                    <input type="number" id="edit-sai-qtd" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Observação</label>
+                    <textarea id="edit-sai-obs" rows="3"></textarea>
+                </div>
+                <div class="form-actions" style="margin-top: 20px; text-align: right;">
+                    <button class="btn btn-secondary" onclick="fecharModal('modal-editar-saida')">Cancelar</button>
+                    <button class="btn btn-primary" onclick="salvarEdicaoSaida()">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function editarMovimentacao(id, tipo, material, qtd, nf, obs) {
+            // Decodificar strings que podem ter aspas
+            material = material.replace(/\\'/g, "'");
+            obs = obs ? obs.replace(/\\'/g, "'") : '';
+            nf = nf ? nf.replace(/\\'/g, "'") : '';
+
+            if (tipo === 'Entrada') {
+                document.getElementById('edit-ent-id').value = id;
+                document.getElementById('edit-ent-material').value = material;
+                document.getElementById('edit-ent-qtd').value = qtd;
+                document.getElementById('edit-ent-nf').value = nf || '';
+                document.getElementById('edit-ent-obs').value = obs || '';
+                document.getElementById('modal-editar-entrada').style.display = 'flex';
+            } else if (tipo === 'Saída') {
+                document.getElementById('edit-sai-id').value = id;
+                document.getElementById('edit-sai-material').value = material;
+                document.getElementById('edit-sai-qtd').value = qtd;
+                document.getElementById('edit-sai-obs').value = obs || '';
+                document.getElementById('modal-editar-saida').style.display = 'flex';
+            }
+        }
+
+        async function salvarEdicaoEntrada() {
+            const id = document.getElementById('edit-ent-id').value;
+            const qtd = document.getElementById('edit-ent-qtd').value;
+            const nf = document.getElementById('edit-ent-nf').value;
+            const obs = document.getElementById('edit-ent-obs').value;
+
+            if (!qtd || qtd <= 0) {
+                exibirNotificacaoSistema('Quantidade inválida', 'warning');
+                return;
+            }
+
+            const dados = { id: id, quantidade: qtd, nota_fiscal: nf, observacao: obs };
+            const resultado = await chamarAPI('entrada', 'atualizar', dados);
+
+            if (resultado.sucesso) {
+                exibirNotificacaoSistema('Entrada atualizada!', 'success');
+                fecharModal('modal-editar-entrada');
+                carregarRelatorios(); // Recarregar tabela
+            } else {
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+            }
+        }
+
+        async function salvarEdicaoSaida() {
+            const id = document.getElementById('edit-sai-id').value;
+            const qtd = document.getElementById('edit-sai-qtd').value;
+            const obs = document.getElementById('edit-sai-obs').value;
+
+            if (!qtd || qtd <= 0) {
+                exibirNotificacaoSistema('Quantidade inválida', 'warning');
+                return;
+            }
+
+            const dados = { id: id, quantidade: qtd, observacao: obs };
+            const resultado = await chamarAPI('saida', 'atualizar', dados);
+
+            if (resultado.sucesso) {
+                exibirNotificacaoSistema('Saída atualizada!', 'success');
+                fecharModal('modal-editar-saida');
+                carregarRelatorios(); // Recarregar tabela
+            } else {
+                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
             }
         }
     </script>

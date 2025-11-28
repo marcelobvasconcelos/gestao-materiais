@@ -186,6 +186,101 @@ if ($empresa_id === 0) {
             margin-bottom: 20px;
             opacity: 0.3;
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 0;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 800px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            animation: modalFadeIn 0.3s;
+        }
+
+        @keyframes modalFadeIn {
+            from {opacity: 0; transform: translateY(-20px);}
+            to {opacity: 1; transform: translateY(0);}
+        }
+
+        .modal-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            color: #1e293b;
+        }
+
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .form-group {
+            flex: 1;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #475569;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .form-actions {
+            margin-top: 20px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -210,6 +305,68 @@ if ($empresa_id === 0) {
                 <div class="loading">
                     <div class="spinner"></div>
                     Carregando materiais...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: EDITAR MATERIAL -->
+    <div id="modal-editar-material" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Editar Material</h2>
+                <span class="close" onclick="fecharModal('modal-editar-material')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-mat-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Nome do Material</label>
+                        <input type="text" id="edit-mat-nome">
+                    </div>
+                    <div class="form-group">
+                        <label>Código SKU</label>
+                        <input type="text" id="edit-mat-sku" readonly style="background-color: #f0f0f0; cursor: not-allowed;">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        <select id="edit-mat-categoria"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Empresa Responsável</label>
+                        <select id="edit-mat-empresa"></select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Unidade de Medida</label>
+                        <select id="edit-mat-unidade">
+                            <option value="1">Unidade</option>
+                            <option value="2">Litro</option>
+                            <option value="3">Kg</option>
+                            <option value="4">Caixa</option>
+                            <option value="5">Pacote</option>
+                            <option value="6">Resma</option>
+                            <option value="7">Rolo</option>
+                            <option value="8">Lata</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ponto de Reposição</label>
+                        <input type="number" id="edit-mat-reposicao">
+                    </div>
+                    <div class="form-group">
+                        <label>Estoque Máximo</label>
+                        <input type="number" id="edit-mat-maximo">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="fecharModal('modal-editar-material')">Cancelar</button>
+                    <button class="btn btn-primary" style="background: #667eea; color: white;" onclick="salvarEdicaoMaterial()">Salvar Alterações</button>
                 </div>
             </div>
         </div>
@@ -358,8 +515,107 @@ if ($empresa_id === 0) {
         }
 
         async function editarMaterial(id) {
-            alert('Função de edição em desenvolvimento. Material ID: ' + id);
-            // TODO: Implementar modal de edição
+            try {
+                // Carregar dados do material
+                const resultado = await chamarAPI('materiais', 'obter', null, `&id=${id}`);
+                
+                if (resultado.sucesso && resultado.dados) {
+                    const mat = resultado.dados;
+                    
+                    // Preencher campos
+                    document.getElementById('edit-mat-id').value = mat.id;
+                    document.getElementById('edit-mat-nome').value = mat.nome;
+                    document.getElementById('edit-mat-sku').value = mat.codigo_sku;
+                    document.getElementById('edit-mat-reposicao').value = mat.ponto_reposicao;
+                    document.getElementById('edit-mat-maximo').value = mat.estoque_maximo;
+                    
+                    // Carregar combos
+                    await carregarCombosEdicao(mat.categoria_id, mat.empresa_id, mat.unidade_medida_id);
+                    
+                    // Abrir modal
+                    document.getElementById('modal-editar-material').style.display = 'flex';
+                } else {
+                    mostrarAlerta('Erro ao carregar material: ' + (resultado.erro || 'Erro desconhecido'), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                mostrarAlerta('Erro ao abrir edição', 'error');
+            }
+        }
+
+        async function carregarCombosEdicao(catId, empId, unidId) {
+            // Categorias
+            const categorias = await chamarAPI('categorias', 'listar');
+            let catHtml = '<option value="">Selecione...</option>';
+            if (categorias.sucesso) {
+                categorias.dados.forEach(c => {
+                    catHtml += `<option value="${c.id}" ${c.id == catId ? 'selected' : ''}>${c.nome}</option>`;
+                });
+            }
+            document.getElementById('edit-mat-categoria').innerHTML = catHtml;
+            
+            // Empresas
+            const empresas = await chamarAPI('empresas', 'listar');
+            let empHtml = '<option value="">Selecione...</option>';
+            if (empresas.sucesso) {
+                empresas.dados.forEach(e => {
+                    empHtml += `<option value="${e.id}" ${e.id == empId ? 'selected' : ''}>${e.nome}</option>`;
+                });
+            }
+            document.getElementById('edit-mat-empresa').innerHTML = empHtml;
+
+            // Unidade
+            const unidadeSelect = document.getElementById('edit-mat-unidade');
+            if (unidadeSelect) {
+                unidadeSelect.value = unidId;
+            }
+        }
+
+        async function salvarEdicaoMaterial() {
+            const id = document.getElementById('edit-mat-id').value;
+            const nome = document.getElementById('edit-mat-nome').value;
+            const categoria = document.getElementById('edit-mat-categoria').value;
+            const empresa = document.getElementById('edit-mat-empresa').value;
+            const unidade = document.getElementById('edit-mat-unidade').value;
+            const reposicao = document.getElementById('edit-mat-reposicao').value;
+            const maximo = document.getElementById('edit-mat-maximo').value;
+            
+            if (!nome || !categoria || !empresa || !unidade) {
+                mostrarAlerta('Preencha todos os campos obrigatórios', 'error');
+                return;
+            }
+            
+            const dados = {
+                id: id,
+                nome: nome,
+                categoria_id: parseInt(categoria),
+                empresa_id: parseInt(empresa),
+                unidade_medida_id: parseInt(unidade),
+                ponto_reposicao: parseFloat(reposicao) || 0,
+                estoque_maximo: parseFloat(maximo) || 0,
+                local_id: null
+            };
+            
+            const resultado = await chamarAPI('materiais', 'atualizar', dados);
+            
+            if (resultado.sucesso) {
+                mostrarAlerta('Material atualizado com sucesso!', 'success');
+                fecharModal('modal-editar-material');
+                carregarMateriais();
+            } else {
+                mostrarAlerta('Erro ao atualizar: ' + resultado.erro, 'error');
+            }
+        }
+
+        function fecharModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // Fechar modal se clicar fora
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = "none";
+            }
         }
 
         async function excluirMaterial(id, nome, estoque) {

@@ -906,12 +906,50 @@ if ($tipo === 'categorias') {
 
 // MATERIAIS
 if ($tipo === 'materiais') {
+    if ($acao === 'obter') {
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+        
+        if (!$id) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID não informado']);
+            exit;
+        }
+        
+        $query = 'SELECT m.*, e.nome as empresa_nome, c.nome as categoria_nome 
+                  FROM materiais m 
+                  LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id 
+                  LEFT JOIN categorias_materiais c ON m.categoria_id = c.id 
+                  WHERE m.id = ?';
+                  
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $dados = $result->fetch_assoc();
+            
+            // Verificar permissão
+            if (isset($_SESSION['empresas_permitidas']) && $_SESSION['empresas_permitidas'] !== 'ALL') {
+                if (!in_array($dados['empresa_id'], $_SESSION['empresas_permitidas'])) {
+                    echo json_encode(['sucesso' => false, 'erro' => 'Sem permissão para visualizar este material']);
+                    exit;
+                }
+            }
+            
+            echo json_encode(['sucesso' => true, 'dados' => $dados]);
+        } else {
+            echo json_encode(['sucesso' => false, 'erro' => 'Material não encontrado']);
+        }
+        exit;
+    }
+
     if ($acao === 'listar') {
         try {
-            $query = 'SELECT m.*, e.nome as empresa_nome, c.nome as categoria_nome 
+            $query = 'SELECT m.*, e.nome as empresa_nome, c.nome as categoria_nome, u.simbolo as unidade_simbolo 
                       FROM materiais m 
                       LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id 
                       LEFT JOIN categorias_materiais c ON m.categoria_id = c.id 
+                      LEFT JOIN unidades_medida u ON m.unidade_medida_id = u.id 
                       WHERE m.ativo = 1';
             
             // Aplicar filtro apenas se usuário não for admin
@@ -941,6 +979,10 @@ if ($tipo === 'materiais') {
             if (isset($_GET['local_id']) && !empty($_GET['local_id'])) {
                 $local_id = intval($_GET['local_id']);
                 $query .= " AND m.local_id = $local_id";
+            }
+
+            if (isset($_GET['somente_com_estoque']) && $_GET['somente_com_estoque'] === 'true') {
+                $query .= " AND m.estoque_atual > 0";
             }
             
             $query .= ' ORDER BY m.nome LIMIT 50';
@@ -1073,7 +1115,8 @@ if ($tipo === 'materiais') {
         // Preparar valores (baseado na estrutura real)
         $categoria_id = $dados['categoria_id'] ?? 2; // Ferramentas existe
         $unidade_id = $dados['unidade_medida_id'] ?? 1;
-        $local_id = isset($dados['local_id']) ? $dados['local_id'] : null; // Permitir nulo
+        // CORREÇÃO: Usar ID 1 (Almoxarifado Central) como padrão se não informado, pois a coluna é NOT NULL
+        $local_id = (!empty($dados['local_id']) && $dados['local_id'] > 0) ? intval($dados['local_id']) : 1;
         $ponto_reposicao = $dados['ponto_reposicao'] ?? 0;
         $estoque_maximo = $dados['estoque_maximo'] ?? 0;
 
@@ -1110,8 +1153,8 @@ if ($tipo === 'materiais') {
             exit;
         }
         
-        // Verificar se material existe
-        $stmt = $conn->prepare('SELECT empresa_id FROM materiais WHERE id = ? AND ativo = 1');
+        // Verificar se material existe e buscar local_id atual
+        $stmt = $conn->prepare('SELECT empresa_id, local_id FROM materiais WHERE id = ? AND ativo = 1');
         $stmt->bind_param('i', $material_id);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -1129,14 +1172,18 @@ if ($tipo === 'materiais') {
             exit;
         }
         
-        $stmt = $conn->prepare('UPDATE materiais SET nome=?, categoria_id=?, empresa_id=?, local_id=?, ponto_reposicao=?, estoque_maximo=? WHERE id=?');
+        // Tratamento de dados
+        $unidade_id = isset($dados['unidade_medida_id']) ? intval($dados['unidade_medida_id']) : 1;
+
+        // CORREÇÃO: Removido local_id da atualização para manter o valor original sem disparar erro de FK
+        $stmt = $conn->prepare('UPDATE materiais SET nome=?, categoria_id=?, empresa_id=?, unidade_medida_id=?, ponto_reposicao=?, estoque_maximo=? WHERE id=?');
         $stmt->bind_param('siiiddi', 
             $dados['nome'],
             $dados['categoria_id'],
             $dados['empresa_id'],
-            $dados['local_id'],
-            $dados['ponto_reposicao'] ?? 0,
-            $dados['estoque_maximo'] ?? 0,
+            $unidade_id,
+            $dados['ponto_reposicao'],
+            $dados['estoque_maximo'],
             $material_id
         );
         
@@ -1684,7 +1731,7 @@ if ($tipo === 'relatorios') {
         
         // Entradas
         if ($tipo_mov === 'todos' || $tipo_mov === 'entrada') {
-            $query = "SELECT 'Entrada' as tipo, me.data_entrada as data, m.nome as material, e.nome as empresa, me.quantidade, u.nome as responsavel
+            $query = "SELECT 'Entrada' as tipo, me.id, me.data_entrada as data, m.nome as material, e.nome as empresa, me.quantidade, u.nome as responsavel, me.nota_fiscal, me.observacao
                       FROM movimentacoes_entrada me
                       JOIN materiais m ON me.material_id = m.id
                       LEFT JOIN empresas_terceirizadas e ON m.empresa_id = e.id
@@ -1702,7 +1749,7 @@ if ($tipo === 'relatorios') {
         
         // Saídas
         if ($tipo_mov === 'todos' || $tipo_mov === 'saida') {
-            $query = "SELECT 'Saída' as tipo, ms.data_saida as data, m.nome as material, e.nome as empresa, ms.quantidade, '-' as responsavel
+            $query = "SELECT 'Saída' as tipo, ms.id, ms.data_saida as data, m.nome as material, e.nome as empresa, ms.quantidade, '-' as responsavel, '' as nota_fiscal, ms.observacao
                       FROM movimentacoes_saida ms
                       JOIN materiais m ON ms.material_id = m.id
                       LEFT JOIN empresas_terceirizadas e ON ms.empresa_solicitante_id = e.id
@@ -1887,6 +1934,67 @@ if ($tipo === 'entrada') {
         }
         exit;
     }
+    if ($acao === 'atualizar') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem editar entradas']);
+            exit;
+        }
+
+        $id = intval($dados['id']);
+        $nova_quantidade = floatval($dados['quantidade']);
+        
+        if (!$id || $nova_quantidade <= 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID e quantidade válida são obrigatórios']);
+            exit;
+        }
+
+        $conn->begin_transaction();
+        try {
+            // 1. Buscar dados atuais da movimentação e do material
+            $stmt = $conn->prepare('SELECT me.quantidade as qtd_antiga, me.material_id, m.estoque_atual, m.nome as material_nome 
+                                    FROM movimentacoes_entrada me 
+                                    JOIN materiais m ON me.material_id = m.id 
+                                    WHERE me.id = ?');
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+            $atual = $stmt->get_result()->fetch_assoc();
+
+            if (!$atual) {
+                throw new Exception('Movimentação não encontrada');
+            }
+
+            // 2. Calcular diferença
+            $diferenca = $nova_quantidade - $atual['qtd_antiga'];
+
+            // 3. Validar se o estoque suporta a redução (se houver)
+            // Se diferença for negativa (ex: era 10, virou 8 => diff -2), estoque deve ser >= 2
+            if ($diferenca < 0 && ($atual['estoque_atual'] + $diferenca) < 0) {
+                throw new Exception("Estoque insuficiente para esta alteração. Estoque atual: {$atual['estoque_atual']}, Redução necessária: " . abs($diferenca));
+            }
+
+            // 4. Atualizar movimentação
+            $stmt = $conn->prepare('UPDATE movimentacoes_entrada SET quantidade = ?, local_destino_id = ?, nota_fiscal = ?, observacao = ? WHERE id = ?');
+            $local_destino_id = isset($dados['local_destino_id']) ? intval($dados['local_destino_id']) : null;
+            $stmt->bind_param('disisi', $nova_quantidade, $local_destino_id, $dados['nota_fiscal'], $dados['observacao'], $id);
+            $stmt->execute();
+
+            // 5. Atualizar estoque do material
+            if ($diferenca != 0) {
+                $novo_estoque = $atual['estoque_atual'] + $diferenca;
+                $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+                $stmt->bind_param('di', $novo_estoque, $atual['material_id']);
+                $stmt->execute();
+            }
+
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Entrada atualizada com sucesso']);
+
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar: ' . $e->getMessage()]);
+        }
+        exit;
+    }
 }
 
 // SAÍDA DE MATERIAIS
@@ -1968,6 +2076,70 @@ if ($tipo === 'saida') {
         } catch (Exception $e) {
             $conn->rollback();
             echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar saída: ' . $e->getMessage()]);
+        }
+        exit;
+    }
+
+    if ($acao === 'atualizar') {
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem editar saídas']);
+            exit;
+        }
+
+        $id = intval($dados['id']);
+        $nova_quantidade = floatval($dados['quantidade']);
+        
+        if (!$id || $nova_quantidade <= 0) {
+            echo json_encode(['sucesso' => false, 'erro' => 'ID e quantidade válida são obrigatórios']);
+            exit;
+        }
+
+        $conn->begin_transaction();
+        try {
+            // 1. Buscar dados atuais
+            $stmt = $conn->prepare('SELECT ms.quantidade as qtd_antiga, ms.material_id, m.estoque_atual, m.nome as material_nome 
+                                    FROM movimentacoes_saida ms 
+                                    JOIN materiais m ON ms.material_id = m.id 
+                                    WHERE ms.id = ?');
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+            $atual = $stmt->get_result()->fetch_assoc();
+
+            if (!$atual) {
+                throw new Exception('Movimentação não encontrada');
+            }
+
+            // 2. Calcular diferença
+            // Se nova=15, antiga=10 => diff=5 (saiu +5, estoque diminui 5)
+            // Se nova=5, antiga=10 => diff=-5 (saiu -5, estoque aumenta 5)
+            $diferenca = $nova_quantidade - $atual['qtd_antiga'];
+
+            // 3. Validar estoque
+            // Se diff > 0 (estamos tirando mais do estoque), verificar se tem saldo
+            if ($diferenca > 0 && ($atual['estoque_atual'] - $diferenca) < 0) {
+                throw new Exception("Estoque insuficiente para aumentar a saída. Estoque atual: {$atual['estoque_atual']}, Necessário: $diferenca");
+            }
+
+            // 4. Atualizar movimentação
+            $stmt = $conn->prepare('UPDATE movimentacoes_saida SET quantidade = ?, local_origem_id = ?, observacao = ? WHERE id = ?');
+            $local_origem_id = isset($dados['local_origem_id']) ? intval($dados['local_origem_id']) : null;
+            $stmt->bind_param('disi', $nova_quantidade, $local_origem_id, $dados['observacao'], $id);
+            $stmt->execute();
+
+            // 5. Atualizar estoque do material
+            if ($diferenca != 0) {
+                $novo_estoque = $atual['estoque_atual'] - $diferenca;
+                $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+                $stmt->bind_param('di', $novo_estoque, $atual['material_id']);
+                $stmt->execute();
+            }
+
+            $conn->commit();
+            echo json_encode(['sucesso' => true, 'mensagem' => 'Saída atualizada com sucesso']);
+
+        } catch (Exception $e) {
+            $conn->rollback();
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao atualizar: ' . $e->getMessage()]);
         }
         exit;
     }
