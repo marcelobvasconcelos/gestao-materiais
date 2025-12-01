@@ -2111,8 +2111,8 @@ if ($tipo === 'entrada') {
     }
 
     if ($acao === 'criar') {
-        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem registrar entradas']);
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2 && $_SESSION['usuario_perfil'] != 3)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores, gestores e operadores podem registrar saídas']);
             exit;
         }
         
@@ -2496,141 +2496,82 @@ if ($tipo === 'saida') {
     }
 
     if ($acao === 'criar_multipla') {
-        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2)) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores e gestores podem registrar saídas']);
+        if (!isset($_SESSION['usuario_perfil']) || ($_SESSION['usuario_perfil'] != 1 && $_SESSION['usuario_perfil'] != 2 && $_SESSION['usuario_perfil'] != 3)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Apenas administradores, gestores e operadores podem registrar saídas']);
             exit;
         }
 
-        $material_id = intval($dados['material_id']);
-        $quantidade_total = floatval($dados['quantidade_total']);
-        $saidas_por_local = $dados['saidas_por_local'] ?? [];
+        $itens = $dados['itens'] ?? [];
 
-        if (!$material_id || $quantidade_total <= 0 || empty($saidas_por_local)) {
-            echo json_encode(['sucesso' => false, 'erro' => 'Material, quantidade total e saídas por local são obrigatórios']);
+        if (empty($itens) || !is_array($itens)) {
+            echo json_encode(['sucesso' => false, 'erro' => 'Nenhum item informado']);
             exit;
         }
 
         $conn->begin_transaction();
         try {
-            // Verificar estoque total disponível e consolidado
-            $stmt = $conn->prepare('
-                SELECT
-                    m.estoque_atual,
-                    m.empresa_id,
-                    COALESCE(SUM(me.quantidade), 0) as entrada_total,
-                    COALESCE(SUM(
-                        CASE
-                            WHEN ms.local_origem_id IS NOT NULL THEN ms.quantidade
-                            ELSE 0
-                        END
-                    ), 0) as saida_total
-                FROM materiais m
-                LEFT JOIN movimentacoes_entrada me ON m.id = me.material_id
-                LEFT JOIN movimentacoes_saida ms ON m.id = ms.material_id
-                WHERE m.id = ?
-                GROUP BY m.id, m.estoque_atual, m.empresa_id
-            ');
-            $stmt->bind_param('i', $material_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $material = $result->fetch_assoc();
-
-            if (!$material) {
-                throw new Exception('Material não encontrado');
-            }
-
-            $estoque_disponivel = $material['entrada_total'] - $material['saida_total'];
-
-            if ($estoque_disponivel < $quantidade_total) {
-                throw new Exception("Estoque insuficiente. Disponível: {$estoque_disponivel}, solicitado: {$quantidade_total}");
-            }
-
-            // Verificar se as quantidades por local são válidas
-            $quantidade_total_informada = 0;
-            foreach ($saidas_por_local as $saida_local) {
-                $local_id = intval($saida_local['local_id']);
-                $quantidade_local = floatval($saida_local['quantidade']);
-
-                if ($quantidade_local <= 0) {
-                    throw new Exception("Quantidade inválida para o local ID {$local_id}");
+            $stmtInsert = $conn->prepare('INSERT INTO movimentacoes_saida (data_saida, material_id, quantidade, empresa_solicitante_id, local_origem_id, finalidade, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            
+            foreach ($itens as $item) {
+                $material_id = intval($item['material_id']);
+                $quantidade = floatval($item['quantidade']);
+                
+                if (!$material_id || $quantidade <= 0) {
+                    throw new Exception('Material e quantidade inválidos em um dos itens');
                 }
 
-                $quantidade_total_informada += $quantidade_local;
+                // Verificar material e estoque
+                $stmtMat = $conn->prepare('SELECT id, estoque_atual, local_id FROM materiais WHERE id = ?');
+                $stmtMat->bind_param('i', $material_id);
+                $stmtMat->execute();
+                $material = $stmtMat->get_result()->fetch_assoc();
 
-                // Verificar estoque específico para este local (Corrigido para evitar produto cartesiano)
-                $stmt = $conn->prepare('
-                    SELECT
-                        COALESCE(entradas.total, 0) as entrada_local,
-                        COALESCE(saidas.total, 0) as saida_local
-                    FROM (SELECT 1) as dummy
-                    LEFT JOIN (
-                        SELECT SUM(quantidade) as total
-                        FROM movimentacoes_entrada
-                        WHERE material_id = ? AND local_destino_id = ?
-                    ) entradas ON 1=1
-                    LEFT JOIN (
-                        SELECT SUM(quantidade) as total
-                        FROM movimentacoes_saida
-                        WHERE material_id = ? AND local_origem_id = ?
-                    ) saidas ON 1=1
-                ');
-                $stmt->bind_param('iiii', $material_id, $local_id, $material_id, $local_id);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                $estoque_local = $result->fetch_assoc();
-
-                $estoque_disponivel_local = $estoque_local['entrada_local'] - $estoque_local['saida_local'];
-
-                if ($estoque_disponivel_local < $quantidade_local) {
-                    throw new Exception("Estoque insuficiente no local. Local: {$local_id}, disponível: {$estoque_disponivel_local}, solicitado: {$quantidade_local}");
+                if (!$material) {
+                    throw new Exception("Material ID $material_id não encontrado");
                 }
-            }
 
-            if (abs($quantidade_total_informada - $quantidade_total) > 0.01) { // Tolerância para floats
-                throw new Exception("A soma das quantidades por local ({$quantidade_total_informada}) não corresponde à quantidade total ({$quantidade_total})");
-            }
+                if ($material['estoque_atual'] < $quantidade) {
+                    throw new Exception("Estoque insuficiente para o material ID $material_id. Disponível: {$material['estoque_atual']}");
+                }
 
-            // Registrar todas as saídas por local
-            foreach ($saidas_por_local as $saida_local) {
-                $local_origem_id = intval($saida_local['local_id']);
-                $quantidade_local = floatval($saida_local['quantidade']);
+                $local_origem_id = isset($item['local_origem_id']) ? intval($item['local_origem_id']) : null;
 
-                // Registrar saída individual
-                $stmt = $conn->prepare('INSERT INTO movimentacoes_saida
-                    (data_saida, material_id, quantidade, empresa_solicitante_id, local_origem_id, finalidade, observacao)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)');
+                // Verificar estoque por local se especificado
+                if ($local_origem_id) {
+                    $estoque_local = calcularEstoqueLocal($conn, $material_id, $local_origem_id);
+                    if ($estoque_local < $quantidade) {
+                        throw new Exception("Estoque insuficiente no local ID $local_origem_id para o material ID $material_id. Disponível: $estoque_local");
+                    }
+                }
 
-                $data_saida = $dados['data_saida'];
-                $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
-                $empresa_id = isset($dados['empresa_solicitante_id']) ? intval($dados['empresa_solicitante_id']) : null;
-                // Truncar finalidade para evitar erro de banco
-                $finalidade = isset($dados['finalidade']) ? substr($dados['finalidade'], 0, 50) : '';
-                $observacao = $dados['observacao'] ?? '';
-                $observacao = $dados['observacao'] ?? '';
+                // Truncar finalidade
+                $finalidade = isset($item['finalidade']) ? substr($item['finalidade'], 0, 50) : '';
 
-                $stmt->bind_param('sidisss',
-                    $data_saida,
-                    $material_id,
-                    $quantidade_local,
-                    $empresa_id,
-                    $local_origem_id,
-                    $finalidade,
-                    $observacao
+                // Inserir movimentação
+                // data(s), material(i), qtd(d), empresa(i), local(i), fin(s), obs(s)
+                $stmtInsert->bind_param('sidisss', 
+                    $item['data_saida'], 
+                    $material_id, 
+                    $quantidade, 
+                    $item['empresa_solicitante_id'], 
+                    $local_origem_id, 
+                    $finalidade, 
+                    $item['observacao']
                 );
-                $stmt->execute();
-            }
+                $stmtInsert->execute();
 
-            // Atualizar estoque global do material
-            $novo_estoque = $material['estoque_atual'] - $quantidade_total;
-            $stmt = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
-            $stmt->bind_param('di', $novo_estoque, $material_id);
-            $stmt->execute();
+                // Atualizar estoque
+                $novo_estoque = $material['estoque_atual'] - $quantidade;
+                $stmtUpd = $conn->prepare('UPDATE materiais SET estoque_atual = ? WHERE id = ?');
+                $stmtUpd->bind_param('di', $novo_estoque, $material_id);
+                $stmtUpd->execute();
+            }
 
             $conn->commit();
-            echo json_encode(['sucesso' => true, 'mensagem' => 'Saída registrada com sucesso em múltiplos locais']);
+            echo json_encode(['sucesso' => true, 'mensagem' => count($itens) . ' saídas registradas com sucesso']);
         } catch (Exception $e) {
             $conn->rollback();
-            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar saída múltipla: ' . $e->getMessage()]);
+            echo json_encode(['sucesso' => false, 'erro' => 'Erro ao registrar saídas: ' . $e->getMessage()]);
         }
         exit;
     }

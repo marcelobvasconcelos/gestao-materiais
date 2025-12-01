@@ -582,26 +582,50 @@
                                 <div id="sai-material-lista" class="material-autocomplete"></div>
                             </div>
                         </div>
-                    </div>
-                    <div class="form-row">
                         <div class="form-group">
-                            <label>Quantidade Total *</label>
-                            <input type="number" id="sai-quantidade-total" placeholder="0" step="0.01">
+                            <label>Quantidade *</label>
+                            <input type="number" id="sai-quantidade" placeholder="0" step="0.01">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Locais Disponíveis para Saída</label>
-                            <div id="sai-locais-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 10px; background: #f8fafc;">
-                                <p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>
-                            </div>
+                            <label>Local de Origem *</label>
+                            <select id="sai-local-origem">
+                                <option value="">Selecione o material primeiro...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Finalidade *</label>
+                            <input type="text" id="sai-finalidade" placeholder="Ex: Consumo interno, Aula prática...">
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>Observações / Finalidade *</label>
-                        <textarea id="sai-obs" placeholder="Descreva a finalidade da saída (ex: Manutenção, Limpeza, Uso Administrativo...)" rows="3"></textarea>
+                        <label>Observações <small style="color: #999;">(Opcional)</small></label>
+                        <textarea id="sai-obs" placeholder="Observações específicas para este item" rows="1"></textarea>
                     </div>
-                    <button class="btn btn-primary" onclick="registrarSaida()">Registrar Saída</button>
+                    
+                    <div style="margin-bottom: 20px; text-align: right;">
+                        <button class="btn btn-secondary" onclick="adicionarItemSaida()" style="margin-right: 10px;">+ Adicionar à Lista</button>
+                    </div>
+
+                    <!-- Tabela de Itens Temporários -->
+                    <div id="container-lista-saida" style="display: none; margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 10px; background: #f8fafc;">
+                        <h3 style="font-size: 1rem; margin-bottom: 10px; color: #334155;">Itens a Registrar</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #e2e8f0; text-align: left;">
+                                    <th style="padding: 8px;">Material</th>
+                                    <th style="padding: 8px;">Qtd</th>
+                                    <th style="padding: 8px;">Local</th>
+                                    <th style="padding: 8px;">Finalidade</th>
+                                    <th style="padding: 8px;">Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-lista-saida"></tbody>
+                        </table>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="registrarSaida()">Registrar Saída(s)</button>
                 </div>
 
                 <div class="table-container">
@@ -1181,8 +1205,8 @@
                 'materiais': 'Controle de inventário e estoque',
                 'locais': 'Gerencie onde os materiais estão guardados',
                 'categorias': 'Organize os materiais por tipos',
-                'entrada': 'Adicione novos itens ao estoque',
-                'saida': 'Registre o consumo de materiais',
+                'entrada': 'Adicione novos itens ao estoque (Simples ou Múltipla)',
+                'saida': 'Registre o consumo de materiais (Simples ou Múltipla)',
                 'alertas': 'Itens com estoque baixo ou excessivo',
                 'relatorios': 'Visualize dados e exporte PDF',
                 'usuarios': 'Controle de acesso ao sistema'
@@ -2543,36 +2567,53 @@
                     document.getElementById('ent-nf').value = '';
                     document.getElementById('ent-obs').value = '';
                     carregarEntradas();
+                    itensSaida = [];
+                    atualizarTabelaItensSaida();
+                    document.getElementById('sai-finalidade').value = '';
+                    document.getElementById('sai-obs').value = '';
+                    carregarSaidas();
                 } else {
                     exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
                 }
-            } 
-            // Se não houver itens na lista, tentar registrar o item dos campos (modo simples)
+            }
+            // Modo simples (um item)
             else {
-                const dados = {
-                    data_entrada: dataEntrada,
-                    material_id: parseInt(document.getElementById('ent-material').value),
-                    quantidade: parseFloat(document.getElementById('ent-quantidade').value),
-                    nota_fiscal: notaFiscal,
-                    responsavel_id: responsavelId,
-                    local_destino_id: parseInt(document.getElementById('ent-local').value),
-                    observacao: observacao
-                };
+                const materialId = parseInt(document.getElementById('sai-material').value);
+                const quantidade = parseFloat(document.getElementById('sai-quantidade').value);
+                const localId = parseInt(document.getElementById('sai-local-origem').value);
+                const finalidade = document.getElementById('sai-finalidade').value;
+                const observacao = document.getElementById('sai-obs').value;
 
-                if (!dados.material_id || !dados.quantidade) {
+                if (!materialId || !quantidade || quantidade <= 0) {
                     exibirNotificacaoSistema('Adicione itens à lista ou preencha material e quantidade', 'warning');
                     return;
                 }
 
-                const resultado = await chamarAPI('entrada', 'criar', dados);
+                if (!localId) {
+                    exibirNotificacaoSistema('Selecione o local de origem', 'warning');
+                    return;
+                }
+
+                const dados = {
+                    data_saida: dataSaida,
+                    material_id: materialId,
+                    quantidade: quantidade,
+                    empresa_solicitante_id: empresaId,
+                    local_origem_id: localId,
+                    finalidade: finalidade,
+                    observacao: observacao
+                };
+
+                const resultado = await chamarAPI('saida', 'criar', dados);
                 if (resultado.sucesso) {
-                    exibirNotificacaoSistema('Entrada registrada com sucesso!', 'success');
-                    document.getElementById('ent-quantidade').value = '';
-                    document.getElementById('ent-nf').value = '';
-                    document.getElementById('ent-obs').value = '';
-                    document.getElementById('ent-material').value = '';
-                    document.getElementById('ent-material-busca').value = '';
-                    carregarEntradas();
+                    exibirNotificacaoSistema('Saída registrada com sucesso!', 'success');
+                    document.getElementById('sai-quantidade').value = '';
+                    document.getElementById('sai-finalidade').value = '';
+                    document.getElementById('sai-obs').value = '';
+                    document.getElementById('sai-material').value = '';
+                    document.getElementById('sai-material-busca').value = '';
+                    document.getElementById('sai-locais-container').innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>';
+                    carregarSaidas();
                 } else {
                     exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
                 }
@@ -2815,10 +2856,10 @@
         }
 
         async function carregarLocaisComEstoque(materialId) {
-            const container = document.getElementById('sai-locais-container');
+            const selectLocal = document.getElementById('sai-local-origem');
 
             if (!materialId) {
-                container.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>';
+                selectLocal.innerHTML = '<option value="">Selecione o material primeiro...</option>';
                 return;
             }
 
@@ -2827,145 +2868,172 @@
                 const resultado = await chamarAPI('materiais', 'estoque_por_local', null, `&material_id=${materialId}`);
 
                 if (resultado.sucesso && resultado.dados && resultado.dados.length > 0) {
-                    let html = '<div style="max-height: 150px; overflow-y: auto;">';
+                    let html = '<option value="">Selecione o local...</option>';
+                    let temEstoque = false;
 
-                    // Para cada local com estoque, criar um campo de quantidade
                     resultado.dados.forEach(local => {
-                        if (local.estoque > 0) { // Mostrar apenas locais com estoque
-                            html += `
-                                <div class="local-estoque-item" style="display: flex; align-items: center; margin-bottom: 8px; padding: 8px; background: white; border-radius: 0.25rem; border: 1px solid #e2e8f0;">
-                                    <div style="flex: 1;">
-                                        <strong>${local.local_nome}</strong><br>
-                                        <small>Disponível: ${local.estoque}</small>
-                                    </div>
-                                    <div style="width: 100px; margin-left: 10px;">
-                                        <input type="number"
-                                               class="saida-local-qtd"
-                                               data-local-id="${local.local_id}"
-                                               data-estoque-max="${local.estoque}"
-                                               placeholder="Qtd"
-                                               min="0"
-                                               max="${local.estoque}"
-                                               step="0.01"
-                                               style="width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 0.25rem;">
-                                    </div>
-                                </div>
-                            `;
+                        if (local.estoque > 0) {
+                            html += `<option value="${local.local_id}">${local.local_nome} (Disp: ${local.estoque})</option>`;
+                            temEstoque = true;
                         }
                     });
 
-                    html += '</div>';
-                    container.innerHTML = html;
-
-                    // Adicionar eventos para validar quantidades e atualizar total
-                    document.querySelectorAll('.saida-local-qtd').forEach(input => {
-                        input.addEventListener('input', function() {
-                            const max = parseFloat(this.getAttribute('data-estoque-max'));
-                            const valor = parseFloat(this.value) || 0;
-
-                            if (valor > max) {
-                                this.value = max;
-                                exibirNotificacaoSistema(`Quantidade excede o estoque disponível (${max})`, 'warning');
-                            } else if (valor < 0) {
-                                this.value = 0;
-                            }
-
-                            // Calcular soma total
-                            let somaTotal = 0;
-                            document.querySelectorAll('.saida-local-qtd').forEach(inp => {
-                                somaTotal += parseFloat(inp.value) || 0;
-                            });
-                            
-                            // Atualizar campo de quantidade total
-                            const campoTotal = document.getElementById('sai-quantidade-total');
-                            if (campoTotal) {
-                                campoTotal.value = somaTotal > 0 ? somaTotal : '';
-                            }
-                        });
-                    });
+                    if (!temEstoque) {
+                        html = '<option value="">Sem estoque em nenhum local</option>';
+                    }
+                    
+                    selectLocal.innerHTML = html;
                 } else {
-                    container.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Este material não está em nenhum local ou está com estoque 0</p>';
+                    selectLocal.innerHTML = '<option value="">Sem estoque em nenhum local</option>';
                 }
             } catch (error) {
-                container.innerHTML = '<p style="color: #ef4444; text-align: center; padding: 20px;">Erro ao carregar locais com estoque</p>';
-                console.error('Erro ao carregar locais com estoque:', error);
+                selectLocal.innerHTML = '<option value="">Erro ao carregar locais</option>';
+                console.error('Erro ao carregar locais:', error);
             }
         }
 
-        async function registrarSaida() {
+        let itensSaida = [];
+
+        function adicionarItemSaida() {
             const materialId = parseInt(document.getElementById('sai-material').value);
-            const quantidadeTotal = parseFloat(document.getElementById('sai-quantidade-total').value);
-            const empresaSolicitanteId = parseInt(document.getElementById('sai-empresa').value);
+            const materialNome = document.getElementById('sai-material-busca').value;
+            const quantidade = parseFloat(document.getElementById('sai-quantidade').value);
+            const localId = parseInt(document.getElementById('sai-local-origem').value);
+            const localNome = document.getElementById('sai-local-origem').options[document.getElementById('sai-local-origem').selectedIndex]?.text || '-';
+            const finalidade = document.getElementById('sai-finalidade').value;
             const observacao = document.getElementById('sai-obs').value;
 
-            if (!materialId || !quantidadeTotal || !observacao) {
-                exibirNotificacaoSistema('Preencha todos os campos obrigatórios (Material, Quantidade Total e Finalidade)', 'warning');
+            if (!materialId || !quantidade || quantidade <= 0) {
+                exibirNotificacaoSistema('Selecione um material e uma quantidade válida', 'warning');
                 return;
             }
 
-            if (!empresaSolicitanteId) {
-                exibirNotificacaoSistema('Selecione a empresa', 'warning');
+            if (!localId) {
+                exibirNotificacaoSistema('Selecione o local de origem', 'warning');
                 return;
             }
 
-            // Obter todas as quantidades especificadas nos locais
-            const inputsQuantidade = document.querySelectorAll('.saida-local-qtd');
-            const saidasLocais = [];
-            let quantidadeTotalInformada = 0;
-
-            inputsQuantidade.forEach(input => {
-                const quantidade = parseFloat(input.value) || 0;
-                if (quantidade > 0) {
-                    const localId = parseInt(input.getAttribute('data-local-id'));
-                    const estoqueMax = parseFloat(input.getAttribute('data-estoque-max'));
-
-                    if (quantidade > estoqueMax) {
-                        exibirNotificacaoSistema(`Quantidade para o local excede o estoque disponível (${estoqueMax})`, 'error');
-                        return;
-                    }
-
-                    saidasLocais.push({
-                        local_id: localId,
-                        quantidade: quantidade
-                    });
-                    quantidadeTotalInformada += quantidade;
-                }
+            // Adicionar ao array
+            itensSaida.push({
+                material_id: materialId,
+                material_nome: materialNome,
+                quantidade: quantidade,
+                local_origem_id: localId,
+                local_nome: localNome,
+                finalidade: finalidade,
+                observacao: observacao
             });
 
-            if (saidasLocais.length === 0) {
-                exibirNotificacaoSistema('Selecione pelo menos um local e quantidade para remover', 'warning');
+            atualizarTabelaItensSaida();
+            
+            // Limpar campos de item (exceto finalidade e obs que podem repetir)
+            document.getElementById('sai-material').value = '';
+            document.getElementById('sai-material-busca').value = '';
+            document.getElementById('sai-quantidade').value = '';
+            document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o material primeiro...</option>';
+        }
+
+        function removerItemSaida(index) {
+            itensSaida.splice(index, 1);
+            atualizarTabelaItensSaida();
+        }
+
+        function atualizarTabelaItensSaida() {
+            const tbody = document.getElementById('tbody-lista-saida');
+            const container = document.getElementById('container-lista-saida');
+            
+            if (itensSaida.length === 0) {
+                container.style.display = 'none';
+                tbody.innerHTML = '';
                 return;
             }
 
-            if (Math.abs(quantidadeTotalInformada - quantidadeTotal) > 0.01) { // Tolerância para floats
-                exibirNotificacaoSistema(`A soma das quantidades (${quantidadeTotalInformada}) deve ser igual à quantidade total informada (${quantidadeTotal})`, 'warning');
-                return;
+            container.style.display = 'block';
+            let html = '';
+            
+            itensSaida.forEach((item, index) => {
+                html += `
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 8px;">${item.material_nome}</td>
+                        <td style="padding: 8px;">${item.quantidade}</td>
+                        <td style="padding: 8px;">${item.local_nome}</td>
+                        <td style="padding: 8px;">${item.finalidade || '-'}</td>
+                        <td style="padding: 8px;">
+                            <button class="btn btn-danger btn-sm" onclick="removerItemSaida(${index})" style="padding: 2px 8px; font-size: 12px;">X</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = html;
+        }
+
+        async function registrarSaida() {
+            const dataSaida = document.getElementById('sai-data').value;
+            const empresaId = parseInt(document.getElementById('sai-empresa').value) || null;
+
+            // Se houver itens na lista, usar modo múltiplo
+            if (itensSaida.length > 0) {
+                const dados = {
+                    itens: itensSaida.map(item => ({
+                        ...item,
+                        data_saida: dataSaida,
+                        empresa_solicitante_id: empresaId
+                    }))
+                };
+
+                const resultado = await chamarAPI('saida', 'criar_multipla', dados);
+                if (resultado.sucesso) {
+                    exibirNotificacaoSistema(resultado.mensagem || 'Saídas registradas com sucesso!', 'success');
+                    // Limpar tudo
+                    itensSaida = [];
+                    atualizarTabelaItensSaida();
+                    carregarSaidas();
+                } else {
+                    exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+                }
             }
+            // Modo simples (um item)
+            else {
+                const materialId = parseInt(document.getElementById('sai-material').value);
+                const quantidade = parseFloat(document.getElementById('sai-quantidade').value);
+                const localId = parseInt(document.getElementById('sai-local-origem').value);
+                const finalidade = document.getElementById('sai-finalidade').value;
+                const observacao = document.getElementById('sai-obs').value;
 
-            // Preparar dados para envio
-            const dados = {
-                data_saida: document.getElementById('sai-data').value,
-                material_id: materialId,
-                quantidade_total: quantidadeTotal,
-                empresa_solicitante_id: empresaSolicitanteId,
-                saidas_por_local: saidasLocais, // Array com as saídas por local
-                observacao: observacao,
-                finalidade: observacao
-            };
+                if (!materialId || !quantidade || quantidade <= 0) {
+                    exibirNotificacaoSistema('Adicione itens à lista ou preencha material e quantidade', 'warning');
+                    return;
+                }
 
-            const resultado = await chamarAPI('saida', 'criar_multipla', dados);
-            if (resultado.sucesso) {
-                exibirNotificacaoSistema('Saída registrada com sucesso em múltiplos locais!', 'success');
-                // Limpar formulário
-                document.getElementById('sai-quantidade-total').value = '';
-                document.getElementById('sai-obs').value = '';
-                document.getElementById('sai-material').value = '';
-                document.getElementById('sai-material-busca').value = '';
-                const container = document.getElementById('sai-locais-container');
-                container.innerHTML = '<p style="color: #64748b; text-align: center; padding: 20px;">Selecione um material para ver os locais disponíveis</p>';
-                carregarSaidas();
-            } else {
-                exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+                if (!localId) {
+                    exibirNotificacaoSistema('Selecione o local de origem', 'warning');
+                    return;
+                }
+
+                const dados = {
+                    data_saida: dataSaida,
+                    material_id: materialId,
+                    quantidade: quantidade,
+                    empresa_solicitante_id: empresaId,
+                    local_origem_id: localId,
+                    finalidade: finalidade,
+                    observacao: observacao
+                };
+
+                const resultado = await chamarAPI('saida', 'criar', dados);
+                if (resultado.sucesso) {
+                    exibirNotificacaoSistema('Saída registrada com sucesso!', 'success');
+                    document.getElementById('sai-quantidade').value = '';
+                    document.getElementById('sai-finalidade').value = '';
+                    document.getElementById('sai-obs').value = '';
+                    document.getElementById('sai-material').value = '';
+                    document.getElementById('sai-material-busca').value = '';
+                    document.getElementById('sai-local-origem').innerHTML = '<option value="">Selecione o material primeiro...</option>';
+                    carregarSaidas();
+                } else {
+                    exibirNotificacaoSistema('Erro: ' + resultado.erro, 'error');
+                }
             }
         }
 
